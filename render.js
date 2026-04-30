@@ -48,6 +48,16 @@ const Render = (() => {
     });
   }
 
+  // Format ISO date string (YYYY-MM-DD or any parseable) to dd.mm.yyyy
+  function fmtDate(raw) {
+    if (!raw || raw === '—') return '—';
+    const s = String(raw).trim();
+    // Already in YYYY-MM-DD form
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[3] + '.' + m[2] + '.' + m[1];
+    return s;
+  }
+
   // ── SUMMARY TAB ───────────────────────────────────────────
   function renderSummary(d) {
     const totalPnl = d.totalCurrent - d.totalInvested;
@@ -264,10 +274,10 @@ const Render = (() => {
 
     const th = `<tr>
       <th onclick="Render.sortTable('vested-tbl',0)">Ticker<span class="sort-icon">⇅</span></th>
-      <th>Company</th>
-      <th class="right">Qty</th>
-      <th class="right">Avg Cost</th>
-      <th class="right">Price</th>
+      <th onclick="Render.sortTable('vested-tbl',1)">Company<span class="sort-icon">⇅</span></th>
+      <th class="right" onclick="Render.sortTable('vested-tbl',2)">Qty<span class="sort-icon">⇅</span></th>
+      <th class="right" onclick="Render.sortTable('vested-tbl',3)">Avg Cost<span class="sort-icon">⇅</span></th>
+      <th class="right" onclick="Render.sortTable('vested-tbl',4)">Price<span class="sort-icon">⇅</span></th>
       <th class="right" onclick="Render.sortTable('vested-tbl',5)">Invested<span class="sort-icon">⇅</span></th>
       <th class="right" onclick="Render.sortTable('vested-tbl',6)">Current<span class="sort-icon">⇅</span></th>
       <th class="right" onclick="Render.sortTable('vested-tbl',7)">P&amp;L $<span class="sort-icon">⇅</span></th>
@@ -391,14 +401,13 @@ const Render = (() => {
       return `
         <tr>
           <td class="symbol">${s.symbol}</td>
-          <td class="muted">${s.first_buy_date || '—'}</td>
-          <td class="muted">${s.last_sell_date || '—'}</td>
+          <td class="muted">${fmtDate(s.first_buy_date)}</td>
+          <td class="muted">${fmtDate(s.last_sell_date)}</td>
           <td class="right">₹${fmt(parseFloat(s.avg_buy_price_inr || 0), 2)}</td>
           <td class="right">₹${fmt(parseFloat(s.avg_sell_price_inr || 0), 2)}</td>
           <td class="right gold">₹${fmt(parseFloat(s.total_cost_inr || 0), 0)}</td>
           <td class="right">₹${fmt(parseFloat(s.total_proceeds_inr || 0), 0)}</td>
           <td class="right ${pnlClass(pnl)}">₹${fmt(pnl, 0)}</td>
-          <td class="muted" style="font-size:0.7rem;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${s.data_note}">${s.data_note}</td>
         </tr>`;
     }).join('');
 
@@ -416,13 +425,16 @@ const Render = (() => {
         <div class="table-inner">
           <table id="sold-tbl">
             <thead><tr>
-              <th>Symbol</th><th>First Buy</th><th>Last Sell</th>
-              <th class="right">Avg Buy</th><th class="right">Avg Sell</th>
-              <th class="right">Cost</th><th class="right">Proceeds</th>
+              <th onclick="Render.sortTable('sold-tbl',0)">Symbol<span class="sort-icon">⇅</span></th>
+              <th onclick="Render.sortTable('sold-tbl',1)">First Buy<span class="sort-icon">⇅</span></th>
+              <th onclick="Render.sortTable('sold-tbl',2)">Last Sell<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('sold-tbl',3)">Avg Buy<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('sold-tbl',4)">Avg Sell<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('sold-tbl',5)">Cost<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('sold-tbl',6)">Proceeds<span class="sort-icon">⇅</span></th>
               <th class="right" onclick="Render.sortTable('sold-tbl',7)">Realized P&amp;L<span class="sort-icon">⇅</span></th>
-              <th>Note</th>
             </tr></thead>
-            <tbody>${sold.length ? soldRows : `<tr><td colspan="9" class="empty-state">No sold positions</td></tr>`}</tbody>
+            <tbody>${sold.length ? soldRows : `<tr><td colspan="8" class="empty-state">No sold positions</td></tr>`}</tbody>
           </table>
         </div>
       </div>`;
@@ -434,7 +446,13 @@ const Render = (() => {
       const ctx = document.getElementById('pnl-chart')?.getContext('2d');
       if (ctx) {
         if (_pnlChart) _pnlChart.destroy();
-        const labels = pnlData.map(p => p.month || '');
+        // Format "2026-04" → "Apr '26"
+        const labels = pnlData.map(p => {
+          const [y, m] = (p.month || '').split('-');
+          if (!y || !m) return p.month || '';
+          const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10)-1] || m;
+          return mon + ' \'' + y.slice(2);
+        });
         const zRealized = pnlData.map(p => parseFloat(p.zerodha_realized_pnl_inr || 0));
         const vRealized = pnlData.map(p => parseFloat(p.vested_realized_pnl_inr || 0));
         _pnlChart = new Chart(ctx, {
