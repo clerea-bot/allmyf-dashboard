@@ -313,12 +313,24 @@ const Render = (() => {
     const fds   = d.manList.filter(m => m.asset_id?.includes('FD'));
     const rds   = d.manList.filter(m => m.asset_id?.includes('RD'));
 
+    // Bonds and FDs: show invested principal + rate + maturity
     const fiRow = (m) => `
       <tr>
         <td>${m.asset_name || m.asset_id}</td>
         <td class="right gold">₹${fmt(parseFloat(m.invested_amount || m.total_invested || 0), 0)}</td>
-        <td class="right">${m.interest_rate_pa ? m.interest_rate_pa + '' : '—'}</td>
-        <td class="right">${m.maturity_date || '—'}</td>
+        <td class="right">${m.interest_rate_pa ? m.interest_rate_pa + '%' : '—'}</td>
+        <td class="right">${fmtDate(m.maturity_date)}</td>
+        <td class="right">${m.currency || 'INR'}</td>
+        <td>${m.notes || '—'}</td>
+      </tr>`;
+
+    // RDs: balance lives in current_value; monthly contribution in monthly_contribution
+    const rdRow = (m) => `
+      <tr>
+        <td>${m.asset_name || m.asset_id}</td>
+        <td class="right gold">₹${fmt(parseFloat(m.current_value || 0), 0)}</td>
+        <td class="right">₹${fmt(parseFloat(m.monthly_contribution || 0), 0)}/mo</td>
+        <td class="right">${fmtDate(m.maturity_date)}</td>
         <td class="right">${m.currency || 'INR'}</td>
         <td>${m.notes || '—'}</td>
       </tr>`;
@@ -355,10 +367,10 @@ const Render = (() => {
         <div class="table-inner">
           <table>
             <thead><tr>
-              <th>Name</th><th class="right">Balance</th><th class="right">Monthly</th>
+              <th>Name</th><th class="right">Balance</th><th class="right">Monthly SIP</th>
               <th class="right">Maturity</th><th class="right">Currency</th><th>Notes</th>
             </tr></thead>
-            <tbody>${rds.length ? rds.map(fiRow).join('') : blankRow}</tbody>
+            <tbody>${rds.length ? rds.map(rdRow).join('') : blankRow}</tbody>
           </table>
         </div>
       </div>`;
@@ -370,14 +382,19 @@ const Render = (() => {
   function renderRetirement(d) {
     const retList = d.manList.filter(m => m.asset_id?.includes('PENSION') || m.asset_id?.includes('EPFO'));
 
-    const retRow = (m) => `
-      <tr>
-        <td>${m.asset_name || m.asset_id}</td>
-        <td class="right">₹${fmt(parseFloat(m.invested_amount || m.total_invested || 0), 0)}</td>
-        <td class="right gold">₹${fmt(parseFloat(m.current_value || m.current_value_inr || 0), 0)}</td>
-        <td class="right ${pnlClass((parseFloat(m.current_value||0))-(parseFloat(m.invested_amount||0)))}">₹${fmt((parseFloat(m.current_value||0))-(parseFloat(m.invested_amount||0)), 0)}</td>
-        <td>${m.notes || '—'}</td>
-      </tr>`;
+    const retRow = (m) => {
+      const invested = parseFloat(m.invested_amount || m.total_invested || 0);
+      const current  = parseFloat(m.current_value || m.current_value_inr || 0);
+      const growth   = current - invested;
+      return `
+        <tr>
+          <td>${m.asset_name || m.asset_id}</td>
+          <td class="right">${invested > 0 ? '₹' + fmt(invested, 0) : '—'}</td>
+          <td class="right gold">₹${fmt(current, 0)}</td>
+          <td class="right ${invested > 0 ? pnlClass(growth) : ''}">${invested > 0 ? '₹' + fmt(growth, 0) : '—'}</td>
+          <td>${m.notes || '—'}</td>
+        </tr>`;
+    };
 
     const html = `
       ${sectionHeader('Retirement Accounts', retList.length)}

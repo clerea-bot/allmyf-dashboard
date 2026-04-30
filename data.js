@@ -171,12 +171,69 @@ var Data = (function() {
       };
     }, { invested: 0, current: 0 });
 
-    var commodityVal  = parseFloat(snap.commodity_value_inr   || 0);
-    var fiVal         = parseFloat(snap.fixed_income_value_inr || 0);
-    var retirementVal = parseFloat(snap.retirement_value_inr   || 0);
+    // ── COMMODITY VALUE ────────────────────────────────────────
+    // Gold/silver prices from Google Finance (CURRENCY:XAUINR, CURRENCY:XAGINR).
+    // If live prices unavailable (#N/A), falls back to invested_amount for SGB;
+    // gold/silver grams show 0 until the live price formula is fixed.
+    var xauPrice = (lp['FX_XAUINR'] && typeof lp['FX_XAUINR'].price === 'number' && lp['FX_XAUINR'].price > 0)
+      ? lp['FX_XAUINR'].price : 0; // INR per troy oz
+    var xagPrice = (lp['FX_XAGINR'] && typeof lp['FX_XAGINR'].price === 'number' && lp['FX_XAGINR'].price > 0)
+      ? lp['FX_XAGINR'].price : 0;
+    var goldPerGram   = xauPrice > 0 ? xauPrice   / 31.1035 : 0;
+    var silverPerGram = xagPrice > 0 ? xagPrice / 31.1035 : 0;
+
+    var commodityVal = manList.reduce(function(s, m) {
+      if (!m.asset_id || m.asset_id.indexOf('COMMODITY') < 0) return s;
+      var qty = parseFloat(m.quantity || 0);
+      if (m.asset_id.indexOf('GOLD') >= 0 || m.asset_id.indexOf('SGB') >= 0) {
+        // Use live gold price if available, else fall back to invested_amount for SGB
+        return s + (goldPerGram > 0 ? goldPerGram * qty : parseFloat(m.invested_amount || 0));
+      }
+      if (m.asset_id.indexOf('SILVER') >= 0) {
+        return s + (silverPerGram > 0 ? silverPerGram * qty : 0);
+      }
+      return s + parseFloat(m.current_value || m.invested_amount || 0);
+    }, 0);
+
+    // ── FIXED INCOME VALUE ────────────────────────────────────
+    // Bonds and FDs: use current_value (stored = invested principal).
+    // RD: use current_value (running balance). USD assets converted at live rate.
+    var fiVal = manList.reduce(function(s, m) {
+      if (!m.asset_id) return s;
+      var id = m.asset_id;
+      if (id.indexOf('BOND') < 0 && id.indexOf('FD') < 0 && id.indexOf('RD') < 0) return s;
+      var val = parseFloat(m.current_value || m.invested_amount || 0);
+      if (m.currency === 'USD') val = val * usdinr;
+      return s + val;
+    }, 0);
+
+    // ── RETIREMENT VALUE ──────────────────────────────────────
+    // eNPS, APY, EPFO: use current_value from manual_assets (updated monthly from apps).
+    var retirementVal = manList.reduce(function(s, m) {
+      if (!m.asset_id) return s;
+      if (m.asset_id.indexOf('PENSION') < 0 && m.asset_id.indexOf('EPFO') < 0) return s;
+      return s + parseFloat(m.current_value || 0);
+    }, 0);
+
+    // ── TOTALS ────────────────────────────────────────────────
+    // totalInvested includes non-Zerodha MFs and European funds from manList
+    var manInvested = manList.reduce(function(s, m) {
+      if (!m.asset_id) return s;
+      var id = m.asset_id;
+      // Only count asset classes not already captured elsewhere
+      if (id.indexOf('COMMODITY') >= 0 || id.indexOf('BOND') >= 0 ||
+          id.indexOf('FD') >= 0 || id.indexOf('RD') >= 0 ||
+          id.indexOf('PENSION') >= 0 || id.indexOf('EPFO') >= 0 ||
+          id.indexOf('EU_') >= 0 || id.indexOf('MF_') >= 0) {
+        var inv = parseFloat(m.invested_amount || 0);
+        if (m.currency === 'USD') inv = inv * usdinr;
+        return s + inv;
+      }
+      return s;
+    }, 0);
 
     var totalCurrent  = zTotal.current + vTotal.current_inr + commodityVal + fiVal + retirementVal;
-    var totalInvested = zTotal.invested + vTotal.invested_inr;
+    var totalInvested = zTotal.invested + vTotal.invested_inr + manInvested;
 
     var alloc = [
       { name: 'India Equity & ETFs', value: zEquityTotal.current, color: '#C9A84C' },
@@ -195,6 +252,8 @@ var Data = (function() {
     }, 0);
     var assetMap = {};
     assets.forEach(function(a) { assetMap[a.asset_id] = a; });
+
+    console.log('[Data] commodityVal:', commodityVal, '| fiVal:', fiVal, '| retirementVal:', retirementVal);
 
     return {
       raw: d,
