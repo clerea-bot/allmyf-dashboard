@@ -52,7 +52,6 @@ const Render = (() => {
   function fmtDate(raw) {
     if (!raw || raw === '—') return '—';
     const s = String(raw).trim();
-    // Already in YYYY-MM-DD form
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return m[3] + '.' + m[2] + '.' + m[1];
     return s;
@@ -136,9 +135,20 @@ const Render = (() => {
         type: 'doughnut',
         data: { labels: donutLabels, datasets: [{ data: donutValues, backgroundColor: donutColors, borderWidth: 0, hoverOffset: 6 }] },
         options: {
-          cutout: '68%', responsive: true, plugins: { legend: { display: false }, tooltip: {
-            callbacks: { label: (ctx) => ` ${ctx.label}: ${fmtInr(ctx.parsed, true)}` }
-          }},
+          cutout: '68%',
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#fff',
+              titleColor: '#1e1912',
+              bodyColor: '#6b5e50',
+              borderColor: 'rgba(42,33,24,0.14)',
+              borderWidth: 1,
+              padding: 10,
+              callbacks: { label: (ctx) => ` ${ctx.label}: ${fmtInr(ctx.parsed, true)}` }
+            }
+          },
         }
       });
     }
@@ -201,16 +211,17 @@ const Render = (() => {
         <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
       </tr>`).join('');
 
+    // India equity headers — use sortTableGrouped to keep Stocks/REITs/ETFs separate
     const thRow = `
       <tr>
-        <th onclick="Render.sortTable('india-tbl',0)">Symbol<span class="sort-icon">⇅</span></th>
-        <th class="right" onclick="Render.sortTable('india-tbl',1)">Qty<span class="sort-icon">⇅</span></th>
+        <th onclick="Render.sortTableGrouped('india-tbl',0)">Symbol<span class="sort-icon">⇅</span></th>
+        <th class="right" onclick="Render.sortTableGrouped('india-tbl',1)">Qty<span class="sort-icon">⇅</span></th>
         <th class="right">Avg Cost</th>
         <th class="right">LTP</th>
-        <th class="right" onclick="Render.sortTable('india-tbl',4)">Invested<span class="sort-icon">⇅</span></th>
-        <th class="right" onclick="Render.sortTable('india-tbl',5)">Current<span class="sort-icon">⇅</span></th>
-        <th class="right" onclick="Render.sortTable('india-tbl',6)">P&amp;L<span class="sort-icon">⇅</span></th>
-        <th class="right" onclick="Render.sortTable('india-tbl',7)">Day %<span class="sort-icon">⇅</span></th>
+        <th class="right" onclick="Render.sortTableGrouped('india-tbl',4)">Invested<span class="sort-icon">⇅</span></th>
+        <th class="right" onclick="Render.sortTableGrouped('india-tbl',5)">Current<span class="sort-icon">⇅</span></th>
+        <th class="right" onclick="Render.sortTableGrouped('india-tbl',6)">P&amp;L<span class="sort-icon">⇅</span></th>
+        <th class="right" onclick="Render.sortTableGrouped('india-tbl',7)">Day %<span class="sort-icon">⇅</span></th>
       </tr>`;
 
     const html = `
@@ -231,16 +242,16 @@ const Render = (() => {
       ${sectionHeader('Mutual Funds', d.mfRows.length)}
       <div class="table-wrap">
         <div class="table-inner">
-          <table>
+          <table id="mf-tbl">
             <thead><tr>
-              <th>Fund Name</th>
-              <th class="right">Units</th>
+              <th onclick="Render.sortTable('mf-tbl',0)">Fund Name<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',1)">Units<span class="sort-icon">⇅</span></th>
               <th class="right">Avg NAV</th>
               <th class="right">Current NAV</th>
-              <th class="right">Invested</th>
-              <th class="right">Current</th>
-              <th class="right">P&amp;L</th>
-              <th class="right">Change %</th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',4)">Invested<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',5)">Current<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',6)">P&amp;L<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',7)">Change %<span class="sort-icon">⇅</span></th>
             </tr></thead>
             <tbody>${mfRows}</tbody>
           </table>
@@ -253,11 +264,6 @@ const Render = (() => {
   // ── GLOBAL TAB (VESTED) ────────────────────────────────────
   function renderGlobal(d) {
     const vHold = d.vHold;
-
-    // Group by ticker type
-    const stocks  = vHold.filter(h => !['AAPL','AMZN','GOOGL','MSFT','NVDA','META','PLTR','TSLA','MU','TSM'].some(s=>h.symbol===s) && parseFloat(h.quantity||0) < 5 && parseFloat(h.current_value_usd||0) > 10);
-    const etfs    = vHold.filter(h => ['VOO','ACES','XAR','MSOS','BOTZ','BOTT'].includes(h.symbol));
-    const baskets = vHold.filter(h => !stocks.includes(h) && !etfs.includes(h));
 
     const rowHtml = (h) => `
       <tr>
@@ -303,7 +309,6 @@ const Render = (() => {
 
   // ── FIXED INCOME TAB ──────────────────────────────────────
   function renderFI(d) {
-    // Get manual assets for FI
     const bonds = d.manList.filter(m => m.asset_id?.includes('BOND'));
     const fds   = d.manList.filter(m => m.asset_id?.includes('FD'));
     const rds   = d.manList.filter(m => m.asset_id?.includes('RD'));
@@ -395,7 +400,6 @@ const Render = (() => {
   function renderHistory(d) {
     const sold = d.soldStocks;
 
-    // Sold stocks table
     const soldRows = sold.map(s => {
       const pnl = parseFloat(s.realized_pnl_inr || 0);
       return `
@@ -411,7 +415,6 @@ const Render = (() => {
         </tr>`;
     }).join('');
 
-    // Monthly P&L chart (from monthly_pnl array)
     const pnlData = d.monthlyPnl;
 
     const html = `
@@ -441,12 +444,11 @@ const Render = (() => {
 
     document.getElementById('history-content').innerHTML = html;
 
-    // Draw monthly P&L chart
+    // Draw monthly P&L chart — Zerodha realized only
     if (pnlData.length > 0) {
       const ctx = document.getElementById('pnl-chart')?.getContext('2d');
       if (ctx) {
         if (_pnlChart) _pnlChart.destroy();
-        // Format "2026-04" → "Apr '26"
         const labels = pnlData.map(p => {
           const [y, m] = (p.month || '').split('-');
           if (!y || !m) return p.month || '';
@@ -454,25 +456,47 @@ const Render = (() => {
           return mon + ' \'' + y.slice(2);
         });
         const zRealized = pnlData.map(p => parseFloat(p.zerodha_realized_pnl_inr || 0));
-        const vRealized = pnlData.map(p => parseFloat(p.vested_realized_pnl_inr || 0));
         _pnlChart = new Chart(ctx, {
           type: 'bar',
           data: {
             labels,
             datasets: [
-              { label: 'Zerodha Realized (₹)', data: zRealized, backgroundColor: 'rgba(201,168,76,0.7)', borderRadius: 3 },
-              { label: 'Vested Realized (₹)', data: vRealized, backgroundColor: 'rgba(61,214,140,0.6)', borderRadius: 3 },
+              { label: 'Realized (₹)', data: zRealized, backgroundColor: 'rgba(45,95,168,0.72)', borderRadius: 4 },
             ]
           },
           options: {
             responsive: true,
             plugins: {
-              legend: { labels: { color: '#8A90A0', font: { family: 'JetBrains Mono', size: 11 } } },
-              tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ₹${fmt(c.parsed.y, 0)}` } }
+              legend: {
+                labels: {
+                  color: '#a8967e',
+                  font: { family: "'JetBrains Mono', monospace", size: 11 },
+                  boxWidth: 12, boxHeight: 12, borderRadius: 3, useBorderRadius: true
+                }
+              },
+              tooltip: {
+                backgroundColor: '#fff',
+                titleColor: '#1e1912',
+                bodyColor: '#6b5e50',
+                borderColor: 'rgba(42,33,24,0.14)',
+                borderWidth: 1,
+                padding: 10,
+                callbacks: { label: (c) => ` ${c.dataset.label}: ₹${fmt(c.parsed.y, 0)}` }
+              }
             },
             scales: {
-              x: { ticks: { color: '#555D70', font: { family: 'JetBrains Mono', size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-              y: { ticks: { color: '#555D70', font: { family: 'JetBrains Mono', size: 11 }, callback: v => '₹' + fmt(v, 0) }, grid: { color: 'rgba(255,255,255,0.04)' } }
+              x: {
+                ticks: { color: '#a8967e', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+                grid:  { color: 'rgba(42,33,24,0.05)' }
+              },
+              y: {
+                ticks: {
+                  color: '#a8967e',
+                  font: { family: "'JetBrains Mono', monospace", size: 11 },
+                  callback: v => '₹' + fmt(v, 0)
+                },
+                grid: { color: 'rgba(42,33,24,0.05)' }
+              }
             }
           }
         });
@@ -483,8 +507,9 @@ const Render = (() => {
     }
   }
 
-  // ── SORT TABLE ────────────────────────────────────────────
+  // ── SORT TABLE (flat — for MF, Vested, Sold) ─────────────
   let _sortState = {};
+
   function sortTable(tableId, colIdx) {
     const tbl = document.getElementById(tableId);
     if (!tbl) return;
@@ -492,7 +517,6 @@ const Render = (() => {
     const asc = _sortState[key] !== true;
     _sortState[key] = asc;
 
-    // Update header styles
     tbl.querySelectorAll('th').forEach((th, i) => {
       th.classList.toggle('sorted', i === colIdx);
       const icon = th.querySelector('.sort-icon');
@@ -511,5 +535,72 @@ const Render = (() => {
     rows.forEach(r => tbody.appendChild(r));
   }
 
-  return { renderSummary, renderIndia, renderGlobal, renderFI, renderRetirement, renderHistory, filterTable, sortTable };
+  // ── SORT TABLE GROUPED (group-aware — for India Equity) ───
+  // Sorts data rows within each subsec group independently,
+  // so Stocks, REITs, and ETFs always stay visually separated.
+  function sortTableGrouped(tableId, colIdx) {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    const key = `${tableId}-g-${colIdx}`;
+    const asc = _sortState[key] !== true;
+    _sortState[key] = asc;
+
+    // Update header sort indicators
+    tbl.querySelectorAll('th').forEach((th, i) => {
+      th.classList.toggle('sorted', i === colIdx);
+      const icon = th.querySelector('.sort-icon');
+      if (icon) icon.textContent = i === colIdx ? (asc ? '↑' : '↓') : '⇅';
+    });
+
+    const tbody = tbl.querySelector('tbody');
+    const allRows = [...tbody.children];
+
+    // Collect groups: each group = { header: subsec-row, rows: [...data rows] }
+    const groups = [];
+    let current = null;
+    allRows.forEach(row => {
+      if (row.classList.contains('subsec-row')) {
+        current = { header: row, rows: [] };
+        groups.push(current);
+      } else if (current) {
+        current.rows.push(row);
+      }
+    });
+
+    // Parse cell value for comparison
+    const cellVal = (row) => {
+      const cell = row.cells[colIdx];
+      if (!cell) return '';
+      const txt = cell.textContent.replace(/[₹$,+%]/g, '').trim();
+      const n = parseFloat(txt);
+      return isNaN(n) ? txt : n;
+    };
+
+    // Sort each group's rows independently
+    groups.forEach(g => {
+      g.rows.sort((a, b) => {
+        const av = cellVal(a), bv = cellVal(b);
+        if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
+        return asc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+      });
+    });
+
+    // Re-append groups in order: subsec-row → sorted data rows
+    groups.forEach(g => {
+      tbody.appendChild(g.header);
+      g.rows.forEach(r => tbody.appendChild(r));
+    });
+  }
+
+  return {
+    renderSummary,
+    renderIndia,
+    renderGlobal,
+    renderFI,
+    renderRetirement,
+    renderHistory,
+    filterTable,
+    sortTable,
+    sortTableGrouped,
+  };
 })();
