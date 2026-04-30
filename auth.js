@@ -83,7 +83,12 @@ const Auth = (() => {
       setTimeout(() => {
         lockScreen.style.display = 'none';
         app.classList.add('visible');
-        window.App && App.init();
+        // Guard: App may not be parsed yet if session restored on cold load
+        if (window.App && typeof App.init === 'function') {
+          App.init();
+        } else {
+          document.addEventListener('DOMContentLoaded', () => App.init());
+        }
       }, 600);
     }
 
@@ -93,7 +98,8 @@ const Auth = (() => {
       setTimeout(() => pwdInput.classList.remove('error'), 600);
     }
 
-    if (checkSession()) { showApp(); return; }
+    // Delay 50ms so all scripts finish parsing before showApp fires
+    if (checkSession()) { setTimeout(showApp, 50); return; }
 
     function handleUnlock() {
       const pwd = pwdInput.value.trim();
