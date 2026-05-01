@@ -71,8 +71,7 @@ const Render = (() => {
       { label: 'Fixed Income', value: fmtInr(d.fiVal, true), cls: '', sub: 'Bonds · FDs · RD' },
       { label: 'Retirement', value: fmtInr(d.retirementVal, true), cls: '', sub: 'eNPS · APY · EPFO' },
       { label: 'USD/INR Rate', value: `₹${fmt(d.usdinr, 2)}`, cls: 'muted', sub: 'Live via Google Finance' },
-      { label: 'Apr 2026 Realized', value: fmtInr(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0) + parseFloat(d.latestPnl.vested_realized_pnl_inr || 0), true), cls: pnlClass(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0)), sub: `Zerodha + Vested` },
-      { label: 'Exited Positions', value: fmt(d.soldStocks.length), cls: 'muted', sub: `Total realized: ${fmtInr(d.soldTotal, true)}` },
+      { label: 'Apr 2026 Realized', value: fmtInr(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0) + parseFloat(d.latestPnl.vested_realized_pnl_inr || 0), true), cls: pnlClass(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0)), sub: `Zerodha + Vested · ${fmtInr(d.soldTotal, true)} lifetime realized` },
     ];
 
     const cardsHtml = `
@@ -224,6 +223,23 @@ const Render = (() => {
         <th class="right" onclick="Render.sortTableGrouped('india-tbl',7)">Day %<span class="sort-icon">⇅</span></th>
       </tr>`;
 
+    // Non-Zerodha MF rows from manual_assets (live NAV in Phase 5)
+    const manMFs = d.manList.filter(m => m.asset_id?.startsWith('MF_'));
+    const manMFRows = manMFs.map(m => {
+      const units    = parseFloat(m.quantity || 0);
+      const invested = parseFloat(m.invested_amount || 0);
+      return `
+        <tr>
+          <td class="company" style="max-width:280px" title="${m.asset_name}">${m.asset_name}</td>
+          <td class="right">${fmt(units, 3)}</td>
+          <td class="right gold">₹${fmt(invested, 0)}</td>
+          <td class="right muted">—</td>
+          <td class="right muted">—</td>
+          <td class="right muted">—</td>
+          <td class="right muted"><span class="tag tag-etf">NAV · Ph5</span></td>
+        </tr>`;
+    }).join('');
+
     const html = `
       ${sectionHeader('India Equity & ETFs', d.zEquityRows?.length || d.zEquityStocks.length + d.zReits.length + d.zEtfs.length)}
       <div class="table-wrap">
@@ -239,7 +255,7 @@ const Render = (() => {
           </table>
         </div>
       </div>
-      ${sectionHeader('Mutual Funds', d.mfRows.length)}
+      ${sectionHeader('Mutual Funds — Zerodha', d.mfRows.length)}
       <div class="table-wrap">
         <div class="table-inner">
           <table id="mf-tbl">
@@ -254,6 +270,23 @@ const Render = (() => {
               <th class="right" onclick="Render.sortTable('mf-tbl',7)">Change %<span class="sort-icon">⇅</span></th>
             </tr></thead>
             <tbody>${mfRows}</tbody>
+          </table>
+        </div>
+      </div>
+      ${sectionHeader('Mutual Funds — Other Platforms', manMFs.length, 'Live NAV · Phase 5')}
+      <div class="table-wrap">
+        <div class="table-inner">
+          <table id="manmf-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('manmf-tbl',0)">Fund Name<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',1)">Units<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',2)">Invested<span class="sort-icon">⇅</span></th>
+              <th class="right">Current</th>
+              <th class="right">P&amp;L</th>
+              <th class="right">Change %</th>
+              <th class="right">Status</th>
+            </tr></thead>
+            <tbody>${manMFRows || `<tr><td colspan="7" class="empty-state">No non-Zerodha MF data</td></tr>`}</tbody>
           </table>
         </div>
       </div>`;
@@ -290,6 +323,24 @@ const Render = (() => {
       <th class="right" onclick="Render.sortTable('vested-tbl',8)">Return %<span class="sort-icon">⇅</span></th>
     </tr>`;
 
+    // European funds from manual_assets
+    const euFunds = d.manList.filter(m => m.asset_id?.startsWith('EU_'));
+    const euRows = euFunds.map(m => {
+      const investedUsd = parseFloat(m.invested_amount || 0);
+      const currentUsd  = parseFloat(m.current_value || 0);
+      const currentInr  = parseFloat(m.current_value_inr || currentUsd * d.usdinr);
+      const pnlUsd = currentUsd - investedUsd;
+      return `
+        <tr>
+          <td class="company">${m.asset_name}</td>
+          <td class="right gold">$${fmt(investedUsd, 2)}</td>
+          <td class="right">$${fmt(currentUsd, 2)}</td>
+          <td class="right">₹${fmt(currentInr, 0)}</td>
+          <td class="right ${pnlClass(pnlUsd)}">$${fmt(pnlUsd, 2)}</td>
+          <td class="right muted">${m.usd_inr_at_snapshot ? '@ ₹' + fmt(parseFloat(m.usd_inr_at_snapshot), 2) : '—'}</td>
+        </tr>`;
+    }).join('');
+
     const html = `
       ${sectionHeader('Vested Holdings', vHold.length, `$${fmt(d.vTotal.current_usd, 0)} current`)}
       <div class="table-wrap">
@@ -302,6 +353,22 @@ const Render = (() => {
             </tbody>
           </table>
         </div>
+      </div>
+      ${sectionHeader('European Funds', euFunds.length, 'Via Vested — manual update')}
+      <div class="table-wrap">
+        <div class="table-inner">
+          <table>
+            <thead><tr>
+              <th>Fund Name</th>
+              <th class="right">Invested (USD)</th>
+              <th class="right">Current (USD)</th>
+              <th class="right">Current (INR)</th>
+              <th class="right">P&amp;L (USD)</th>
+              <th class="right">FX Rate Used</th>
+            </tr></thead>
+            <tbody>${euRows || `<tr><td colspan="6" class="empty-state">No European fund data</td></tr>`}</tbody>
+          </table>
+        </div>
       </div>`;
 
     document.getElementById('global-content').innerHTML = html;
@@ -312,32 +379,82 @@ const Render = (() => {
     const bonds = d.manList.filter(m => m.asset_id?.includes('BOND'));
     const fds   = d.manList.filter(m => m.asset_id?.includes('FD'));
     const rds   = d.manList.filter(m => m.asset_id?.includes('RD'));
+    const comms = d.manList.filter(m => m.asset_id?.includes('COMMODITY'));
 
-    // Bonds and FDs: show invested principal + rate + maturity
-    const fiRow = (m) => `
-      <tr>
-        <td>${m.asset_name || m.asset_id}</td>
-        <td class="right gold">₹${fmt(parseFloat(m.invested_amount || m.total_invested || 0), 0)}</td>
-        <td class="right">${m.interest_rate_pa ? m.interest_rate_pa + '%' : '—'}</td>
-        <td class="right">${fmtDate(m.maturity_date)}</td>
-        <td class="right">${m.currency || 'INR'}</td>
-        <td>${m.notes || '—'}</td>
-      </tr>`;
+    // Live gold/silver per gram (from Google Finance formula in live_prices sheet)
+    const xauPrice = d.lp?.FX_XAUINR?.price;
+    const xagPrice = d.lp?.FX_XAGINR?.price;
+    const goldPerGram   = (xauPrice   && xauPrice   > 100) ? xauPrice   / 31.1035 : 0;
+    const silverPerGram = (xagPrice && xagPrice > 0.5)  ? xagPrice / 31.1035 : 0;
 
-    // RDs: balance lives in current_value; monthly contribution in monthly_contribution
+    // Commodity rows
+    const commRow = (m) => {
+      const qty = parseFloat(m.quantity || 0);
+      let currentVal = '—';
+      if (m.asset_id.includes('SILVER') && silverPerGram > 0) {
+        currentVal = '₹' + fmt(silverPerGram * qty, 0);
+      } else if ((m.asset_id.includes('GOLD') || m.asset_id.includes('SGB')) && goldPerGram > 0) {
+        currentVal = '₹' + fmt(goldPerGram * qty, 0);
+      }
+      const investedStr = parseFloat(m.invested_amount || 0) > 0
+        ? '₹' + fmt(parseFloat(m.invested_amount), 0) : '—';
+      const sipStr = parseFloat(m.monthly_contribution || 0) > 0
+        ? '₹' + fmt(parseFloat(m.monthly_contribution), 0) + '/mo' : '—';
+      return `
+        <tr>
+          <td style="min-width:200px">${m.asset_name || m.asset_id}</td>
+          <td class="right">${fmt(qty, 3)} ${m.unit || 'g'}</td>
+          <td class="right">${sipStr}</td>
+          <td class="right gold">${investedStr}</td>
+          <td class="right">${currentVal}</td>
+        </tr>`;
+    };
+
+    // Bond/FD rows — currency-aware amount display
+    const fiRow = (m) => {
+      const amount = parseFloat(m.invested_amount || m.total_invested || 0);
+      const amtStr = m.currency === 'USD' ? `$${fmt(amount, 2)}` : `₹${fmt(amount, 0)}`;
+      return `
+        <tr>
+          <td style="min-width:180px">${m.asset_name || m.asset_id}</td>
+          <td class="right gold" style="min-width:100px">${amtStr}</td>
+          <td class="right" style="min-width:80px">${m.interest_rate_pa ? m.interest_rate_pa + '%' : '—'}</td>
+          <td class="right" style="min-width:100px">${fmtDate(m.maturity_date)}</td>
+          <td class="right" style="min-width:70px">${m.currency || 'INR'}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.notes || ''}">${m.notes || '—'}</td>
+        </tr>`;
+    };
+
+    // RD rows
     const rdRow = (m) => `
       <tr>
-        <td>${m.asset_name || m.asset_id}</td>
-        <td class="right gold">₹${fmt(parseFloat(m.current_value || 0), 0)}</td>
-        <td class="right">₹${fmt(parseFloat(m.monthly_contribution || 0), 0)}/mo</td>
-        <td class="right">${fmtDate(m.maturity_date)}</td>
-        <td class="right">${m.currency || 'INR'}</td>
-        <td>${m.notes || '—'}</td>
+        <td style="min-width:180px">${m.asset_name || m.asset_id}</td>
+        <td class="right gold" style="min-width:100px">₹${fmt(parseFloat(m.current_value || 0), 0)}</td>
+        <td class="right" style="min-width:80px">₹${fmt(parseFloat(m.monthly_contribution || 0), 0)}/mo</td>
+        <td class="right" style="min-width:100px">${fmtDate(m.maturity_date)}</td>
+        <td class="right" style="min-width:70px">${m.currency || 'INR'}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.notes || ''}">${m.notes || '—'}</td>
       </tr>`;
 
     const blankRow = `<tr><td colspan="6" class="empty-state">No data — check manual_assets tab</td></tr>`;
 
+    const liveNote = goldPerGram > 0
+      ? `Live gold ₹${fmt(goldPerGram, 0)}/g · silver ₹${fmt(silverPerGram, 2)}/g`
+      : 'Live prices not yet available — add GOOGLEFINANCE formulas to live_prices tab';
+
     const html = `
+      ${sectionHeader('Commodities', comms.length, liveNote)}
+      <div class="table-wrap">
+        <div class="table-inner">
+          <table>
+            <thead><tr>
+              <th>Asset</th><th class="right">Holding</th><th class="right">Monthly SIP</th>
+              <th class="right">Invested</th><th class="right">Current Value</th>
+            </tr></thead>
+            <tbody>${comms.length ? comms.map(commRow).join('') : blankRow}</tbody>
+          </table>
+        </div>
+      </div>
       ${sectionHeader('Bonds', bonds.length)}
       <div class="table-wrap">
         <div class="table-inner">
