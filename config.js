@@ -19,7 +19,8 @@ const CONFIG = {
   CACHE_SECONDS: 300,
 
   // USD/INR fallback rate if live price unavailable
-  FALLBACK_USDINR: 84.5,
+  // Update this each time the rate moves significantly (current: May 2026)
+  FALLBACK_USDINR: 94.5,
 
   // Dashboard owner name (shown in header)
   OWNER_NAME: 'AllMyF',

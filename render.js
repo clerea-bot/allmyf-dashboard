@@ -796,6 +796,147 @@ const Render = (() => {
     });
   }
 
+  // ── ALERTS TAB ────────────────────────────────────────────
+  // Renders anomaly alerts computed by Apps Script computeStockAlerts().
+  // Alert types: PRICE_MOVE, QTY_CHANGE, NEW_POSITION, POSITION_CLOSED.
+  // Only covers stocks — REITs, ETFs, and MFs are excluded at the source.
+  // Requires ≥2 months of zerodha_holdings_import data; shows a placeholder
+  // message until May 2026 data is imported.
+  function renderAlerts(d) {
+    const alerts = d.stockAlerts || [];
+
+    // Type display config: label, badge CSS class, description
+    const TYPE_META = {
+      PRICE_MOVE:       { label: 'Price Move',       cls: 'alert-price',    icon: '⚡' },
+      QTY_CHANGE:       { label: 'Qty Changed',      cls: 'alert-qty',      icon: '🔄' },
+      NEW_POSITION:     { label: 'New Position',     cls: 'alert-new',      icon: '✚' },
+      POSITION_CLOSED:  { label: 'Position Closed',  cls: 'alert-closed',   icon: '✕' },
+    };
+
+    // Sort: PRICE_MOVE first (most actionable), then others; within each group by |change_pct| desc
+    const sorted = [...alerts].sort((a, b) => {
+      const typeOrder = { PRICE_MOVE: 0, QTY_CHANGE: 1, NEW_POSITION: 2, POSITION_CLOSED: 3 };
+      const to = (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
+      if (to !== 0) return to;
+      return Math.abs(parseFloat(b.change_pct) || 0) - Math.abs(parseFloat(a.change_pct) || 0);
+    });
+
+    const alertRows = sorted.map(a => {
+      const meta      = TYPE_META[a.type] || { label: a.type, cls: '', icon: '•' };
+      const changePct = parseFloat(a.change_pct);
+      const pctStr2   = !isNaN(changePct)
+        ? `<span class="${pnlClass(changePct)}">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</span>`
+        : '<span class="muted">—</span>';
+
+      const ltpCell  = a.ltp      !== null ? `₹${fmt(a.ltp, 2)}`      : '<span class="muted">—</span>';
+      const prevCell = a.prev_ltp !== null ? `₹${fmt(a.prev_ltp, 2)}` : '<span class="muted">—</span>';
+
+      const qtyDelta = a.qty_delta;
+      const qtyCell  = qtyDelta !== null && qtyDelta !== undefined
+        ? `<span class="${qtyDelta >= 0 ? 'pos' : 'neg'}">${qtyDelta >= 0 ? '+' : ''}${fmt(qtyDelta, 3)}</span>`
+        : '<span class="muted">—</span>';
+
+      return `
+        <tr>
+          <td class="symbol">${a.symbol}</td>
+          <td><span class="alert-badge ${meta.cls}">${meta.icon} ${meta.label}</span></td>
+          <td class="right">${prevCell}</td>
+          <td class="right">${ltpCell}</td>
+          <td class="right">${pctStr2}</td>
+          <td class="right">${fmt(a.prev_qty, 3) || '<span class="muted">—</span>'}</td>
+          <td class="right">${fmt(a.qty, 3)}</td>
+          <td class="right">${qtyCell}</td>
+        </tr>`;
+    }).join('');
+
+    // Summary stats
+    const priceMoves = alerts.filter(a => a.type === 'PRICE_MOVE').length;
+    const qtyChanges = alerts.filter(a => a.type === 'QTY_CHANGE').length;
+    const newPos     = alerts.filter(a => a.type === 'NEW_POSITION').length;
+    const closed     = alerts.filter(a => a.type === 'POSITION_CLOSED').length;
+
+    // Derive comparison months from the alerts
+    const alertMonth = alerts.length > 0 ? alerts[0].month : null;
+    const subLabel   = alertMonth
+      ? `Comparing current snapshot (${alertMonth}) vs previous month`
+      : 'Compares latest two months of zerodha_holdings_import';
+
+    const statsHtml = alerts.length > 0 ? `
+      <div class="alert-stats">
+        ${priceMoves > 0 ? `<span class="alert-stat alert-price">⚡ ${priceMoves} price move${priceMoves > 1 ? 's' : ''} ≥40%</span>` : ''}
+        ${qtyChanges > 0 ? `<span class="alert-stat alert-qty">🔄 ${qtyChanges} qty change${qtyChanges > 1 ? 's' : ''}</span>` : ''}
+        ${newPos     > 0 ? `<span class="alert-stat alert-new">✚ ${newPos} new position${newPos > 1 ? 's' : ''}</span>` : ''}
+        ${closed     > 0 ? `<span class="alert-stat alert-closed">✕ ${closed} closed</span>` : ''}
+      </div>` : '';
+
+    const html = `
+      ${sectionHeader('Stock Anomaly Alerts', alerts.length > 0 ? alerts.length + ' anomalies' : undefined, subLabel)}
+      ${statsHtml}
+      <div class="table-wrap">
+        ${alerts.length > 0 ? tableControls('alerts-tbl', undefined, undefined) : ''}
+        <div class="table-inner">
+          ${alerts.length > 0 ? `
+          <table id="alerts-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('alerts-tbl',0)">Symbol<span class="sort-icon">⇅</span></th>
+              <th>Type</th>
+              <th class="right">Prev LTP</th>
+              <th class="right">Curr LTP</th>
+              <th class="right" onclick="Render.sortTable('alerts-tbl',4)">MoM %<span class="sort-icon">⇅</span></th>
+              <th class="right">Prev Qty</th>
+              <th class="right">Curr Qty</th>
+              <th class="right" onclick="Render.sortTable('alerts-tbl',7)">Qty Δ<span class="sort-icon">⇅</span></th>
+            </tr></thead>
+            <tbody>${alertRows}</tbody>
+          </table>` : `
+          <div class="empty-state" style="padding:40px 0;text-align:center">
+            <div style="font-size:2rem;margin-bottom:12px">✓</div>
+            <div style="font-weight:500;margin-bottom:6px">No anomalies detected</div>
+            <div class="muted" style="font-size:0.85rem">
+              ${d.stockAlerts === undefined || (Array.isArray(d.stockAlerts) && d.stockAlerts.length === 0 && !alertMonth)
+                ? 'Alerts appear here once two months of holdings data are loaded (available after May 2026 import).'
+                : 'No stocks moved ±40% or changed quantity vs previous month.'}
+            </div>
+          </div>`}
+        </div>
+      </div>`;
+
+    document.getElementById('alerts-content').innerHTML = html;
+
+    // Inject alert badge styles if not already present
+    if (!document.getElementById('alert-styles')) {
+      const style = document.createElement('style');
+      style.id = 'alert-styles';
+      style.textContent = `
+        .alert-badge {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 0.78rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        .alert-price  { background: rgba(192,57,43,0.10); color: #c0392b; }
+        .alert-qty    { background: rgba(45,95,168,0.10); color: #2d5fa8; }
+        .alert-new    { background: rgba(26,122,60,0.10); color: #1a7a3c; }
+        .alert-closed { background: rgba(107,78,168,0.10); color: #6b4ea8; }
+        .alert-stats {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin: 0 0 16px;
+        }
+        .alert-stat {
+          padding: 4px 12px;
+          border-radius: 6px;
+          font-size: 0.82rem;
+          font-weight: 500;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }
+
   return {
     renderSummary,
     renderIndia,
@@ -803,6 +944,7 @@ const Render = (() => {
     renderFI,
     renderRetirement,
     renderHistory,
+    renderAlerts,
     filterTable,
     sortTable,
     sortTableGrouped,

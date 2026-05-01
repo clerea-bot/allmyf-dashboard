@@ -412,6 +412,7 @@ var Data = (function() {
       latestPnl: latestPnl,
       soldStocks: soldStocks, soldTotal: soldTotal,
       monthlyPnl: monthlyPnl, snap: snap,
+      stockAlerts: d.stock_alerts || [],
       generatedAt: d._meta && d._meta.generated_at,
     };
   }

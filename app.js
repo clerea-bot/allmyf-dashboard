@@ -68,6 +68,7 @@ var App = (function() {
         case 'fi':         Render.renderFI(_data);         break;
         case 'retirement': Render.renderRetirement(_data); break;
         case 'history':    Render.renderHistory(_data);    break;
+        case 'alerts':    Render.renderAlerts(_data);    break;
       }
       _rendered[tab] = true;
       console.log('[App] renderTab', tab, 'complete');
