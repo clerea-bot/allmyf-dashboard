@@ -1,38 +1,35 @@
 // ═══════════════════════════════════════════════════════════════
-// AllMyF — Data Layer v5
-// Phase 5: mfapi search fallback + TwelveData live stock prices
+// AllMyF — Data Layer v6
+// Phase 5 final: TwelveData moved to Apps Script backend
 //
-// Changes from v4:
-//  - CACHE_KEY bumped to v5 (clears v4 cache)
-//  - mfapi matching: 3-level lookup:
-//      L1 exact name match → L2 starts-with match → L3 mfapi search
-//    L3 searches by first 4 words, then picks candidate whose latest NAV
-//    is within 10% of the Zerodha snapshot ltp_inr (identifies regular plan)
-//  - fetchLivePrices(): TwelveData batch for Indian NSE + US stocks
-//    Separate 30-min cache (CACHE_LP_KEY) independent of main 5-min data cache
-//  - compute() annotates every equity/ETF/REIT/MF row with _liveLTP/_liveCurrent
-//    and recalculates totals from live values where available
+// Changes from v5:
+//  - CACHE_KEY bumped to v6 (clears v5 stale cache)
+//  - fetchLivePrices() removed — TwelveData now runs server-side
+//    via Apps Script UrlFetchApp. Live stock prices arrive in the
+//    main JSON payload as d.live_stock_prices { symbol → price }.
+//  - fetch() chain: httpGet → fetchMfNavs → compute. One fewer async step.
+//  - compute() reads d.live_stock_prices directly (no browser fetch needed)
+//  - mfapi L3 search fallback retained (no extension interference on mfapi.in)
+//  - CACHE_LP_KEY removed (no separate price cache needed)
 // ═══════════════════════════════════════════════════════════════
 
 var Data = (function() {
-  var CACHE_KEY    = 'allmyf_data_v5';
-  var CACHE_LP_KEY = 'allmyf_lp_v1';
+  var CACHE_KEY     = 'allmyf_data_v6';
   var FETCH_TIMEOUT = 25000;
   var _raw      = null;
   var _computed = null;
 
   // ── PUBLIC: fetch ─────────────────────────────────────────
   function fetch() {
-    console.log('[Data] fetch() v5');
+    console.log('[Data] fetch() v6');
 
     var cached = getCache(CACHE_KEY, CONFIG.CACHE_SECONDS);
     if (cached) {
-      console.log('[Data] main data from cache (v5)');
+      console.log('[Data] main data from cache (v6)');
       _raw = cached.data;
       return fetchMfNavs(cached.data)
-        .then(function(mfResult) { return fetchLivePrices(cached.data, mfResult); })
-        .then(function(r) {
-          _computed = compute(cached.data, r.mfResult, r.livePrices);
+        .then(function(mfResult) {
+          _computed = compute(cached.data, mfResult);
           return _computed;
         });
     }
@@ -42,21 +39,23 @@ var Data = (function() {
       _raw = json;
       setCache(CACHE_KEY, { data: json });
       return fetchMfNavs(json)
-        .then(function(mfResult) { return fetchLivePrices(json, mfResult); })
-        .then(function(r) {
-          _computed = compute(json, r.mfResult, r.livePrices);
+        .then(function(mfResult) {
+          _computed = compute(json, mfResult);
           return _computed;
         });
     });
   }
 
   // ── MFAPI — LIVE NAV FETCH (3-level matching) ─────────────
+  // L1: exact lowercase name match with assets_master
+  // L2: starts-with prefix match (Zerodha truncates full scheme names)
+  // L3: mfapi.in search → NAV proximity match (picks regular vs direct plan)
   function fetchMfNavs(rawJson) {
     var assets    = rawJson.assets    || [];
     var zHold     = rawJson.zerodha_holdings || [];
     var mfCodeMap = rawJson.mf_codes  || {};
 
-    // L1 + L2 lookup table: normalised asset_name / ticker_symbol → scheme code
+    // Build name → scheme code map from assets_master
     var nameToCode = {};
     assets.forEach(function(a) {
       var code = a.mf_scheme_code ? String(a.mf_scheme_code).trim() : '';
@@ -66,17 +65,17 @@ var Data = (function() {
     });
 
     var ETF_SYMS = ['OILIETF','METAL','MAHKTECH','CPSEETF','MID150CASE','TOP100CASE'];
-    var zerodhaSymToCode = {};   // sym → scheme code (built across all 3 levels)
-    var neededCodes      = {};   // code → true
+    var zerodhaSymToCode = {};
+    var neededCodes      = {};
     var searchQueue      = [];   // [{symbol, snapshotNav}] for L3
 
-    // Non-Zerodha MF codes from assets_master
+    // Non-Zerodha MF codes (already in assets_master mf_scheme_code)
     Object.keys(mfCodeMap).forEach(function(id) {
       var c = String(mfCodeMap[id] || '').trim();
       if (c && c !== 'LOOKUP_NEEDED') neededCodes[c] = true;
     });
 
-    // Zerodha MFs — L1 and L2
+    // Zerodha MF rows — attempt L1 then L2; queue L3 if no match
     zHold.forEach(function(h) {
       var sym = String(h.symbol || '').trim();
       if (!sym) return;
@@ -92,8 +91,7 @@ var Data = (function() {
         neededCodes[nameToCode[q]] = true;
         return;
       }
-
-      // L2 starts-with (Zerodha symbol is a prefix of the full scheme name, or vice versa)
+      // L2 starts-with
       var found = null;
       var keys  = Object.keys(nameToCode);
       for (var i = 0; i < keys.length; i++) {
@@ -105,12 +103,11 @@ var Data = (function() {
         neededCodes[found] = true;
         return;
       }
-
       // L3 queued
       if (snap > 0) searchQueue.push({ symbol: sym, snapshotNav: snap });
     });
 
-    // L3 — parallel mfapi search + NAV proximity match
+    // L3 — mfapi search + NAV proximity match (within 10%)
     var searchPromises = searchQueue.map(function(item) {
       var words = item.symbol.split(' ').slice(0, 4).join(' ');
       var url   = 'https://api.mfapi.in/mf/search?q=' + encodeURIComponent(words);
@@ -135,7 +132,8 @@ var Data = (function() {
               var diff = Math.abs(nav - item.snapshotNav) / item.snapshotNav;
               if (diff < 0.10 && diff < bestDiff) {
                 bestDiff = diff;
-                best = { symbol: item.symbol, code: String(cands[i].schemeCode), nav, navDate: nr.data[0].navDate };
+                best = { symbol: item.symbol, code: String(cands[i].schemeCode),
+                         nav: nav, navDate: nr.data[0].navDate };
               }
             });
             return best;
@@ -159,7 +157,7 @@ var Data = (function() {
       var allCodes = Object.keys(neededCodes).filter(function(c) {
         return c && c !== 'LOOKUP_NEEDED';
       });
-      if (allCodes.length === 0) return { navMap: {}, zerodhaSymToCode };
+      if (allCodes.length === 0) return { navMap: {}, zerodhaSymToCode: zerodhaSymToCode };
 
       console.log('[Data] mfapi fetching', allCodes.length, 'scheme codes');
       return Promise.all(allCodes.map(function(code) {
@@ -183,85 +181,6 @@ var Data = (function() {
         return { navMap: navMap, zerodhaSymToCode: zerodhaSymToCode };
       });
     });
-  }
-
-  // ── TWELVEDATA — LIVE STOCK PRICES ───────────────────────
-  function fetchLivePrices(rawJson, mfResult) {
-    var cached = getCache(CACHE_LP_KEY, CONFIG.LIVE_PRICE_CACHE_SECONDS || 1800);
-    if (cached) {
-      console.log('[Data] live prices from cache (30 min)');
-      return Promise.resolve({ mfResult: mfResult, livePrices: cached.data });
-    }
-
-    var KEY   = CONFIG.TWELVEDATA_KEY;
-    if (!KEY) return Promise.resolve({ mfResult: mfResult, livePrices: {} });
-
-    var ETF_SYMS = ['OILIETF','METAL','MAHKTECH','CPSEETF','MID150CASE','TOP100CASE'];
-    var zHold = rawJson.zerodha_holdings || [];
-    var vHold = rawJson.vested_holdings  || [];
-
-    // NSE symbols: stocks + ETFs + REITs (strip -RR for lookup, keep symbol)
-    var nseSym = [];
-    zHold.forEach(function(h) {
-      var s = String(h.symbol || '').trim();
-      if (!s || s.indexOf(' ') >= 0 || s.length > 15) return;  // skip MFs
-      if (nseSym.indexOf(s) < 0) nseSym.push(s);
-    });
-
-    var usSym = [];
-    vHold.forEach(function(h) {
-      var s = String(h.symbol || '').trim();
-      if (s && usSym.indexOf(s) < 0) usSym.push(s);
-    });
-
-    console.log('[Data] TwelveData:', nseSym.length, 'NSE +', usSym.length, 'US symbols');
-
-    // TwelveData batch calls — NSE symbols use "SYM:NSE" format
-    function tdFetch(symbols, suffix) {
-      if (symbols.length === 0) return Promise.resolve({});
-      var url = 'https://api.twelvedata.com/price?symbol=' +
-        symbols.map(function(s) { return encodeURIComponent(s + (suffix || '')); }).join(',') +
-        '&apikey=' + KEY;
-      return window.fetch(url, { cache: 'no-store' })
-        .then(function(r) { return r.ok ? r.json() : {}; })
-        .catch(function() { return {}; });
-    }
-
-    return Promise.all([tdFetch(nseSym, ':NSE'), tdFetch(usSym, '')])
-      .then(function(results) {
-        var nseRaw = results[0] || {};
-        var usRaw  = results[1] || {};
-        var livePrices = {}, loaded = 0;
-
-        function extract(raw, sym, suffix) {
-          // Multi-symbol: raw["SYM:NSE"] = {price:"..."} or raw["SYM"] = {price:"..."}
-          var key = sym + (suffix || '');
-          var entry = raw[key] || raw[sym];
-          if (entry && entry.price) {
-            var p = parseFloat(entry.price);
-            if (p > 0) { livePrices[sym] = p; loaded++; }
-          }
-        }
-
-        // Handle single-symbol case (TwelveData returns plain {price:"..."})
-        if (nseSym.length === 1 && nseRaw.price) {
-          var p = parseFloat(nseRaw.price);
-          if (p > 0) { livePrices[nseSym[0]] = p; loaded++; }
-        } else {
-          nseSym.forEach(function(s) { extract(nseRaw, s, ':NSE'); });
-        }
-
-        if (usSym.length === 1 && usRaw.price) {
-          var p2 = parseFloat(usRaw.price);
-          if (p2 > 0) { livePrices[usSym[0]] = p2; loaded++; }
-        } else {
-          usSym.forEach(function(s) { extract(usRaw, s, ''); });
-        }
-
-        console.log('[Data] TwelveData done:', loaded + '/' + (nseSym.length + usSym.length));
-        setCache(CACHE_LP_KEY, { data: livePrices });
-        return { mfResult: mfResult, livePrices: livePrices };
-      });
   }
 
   // ── HTTP GET ─────────────────────────────────────────────
@@ -313,27 +232,31 @@ var Data = (function() {
   }
 
   function clearCache() {
-    sessionStorage.removeItem(CACHE_KEY);
-    sessionStorage.removeItem(CACHE_LP_KEY);
+    // Clear both v5 and v6 keys to ensure full reset
+    ['allmyf_data_v5', 'allmyf_data_v6', 'allmyf_lp_v1'].forEach(function(k) {
+      sessionStorage.removeItem(k);
+    });
     console.log('[Data] all caches cleared');
   }
 
   // ── COMPUTE ───────────────────────────────────────────────
-  function compute(d, mfResult, livePrices) {
-    mfResult    = mfResult    || { navMap: {}, zerodhaSymToCode: {} };
-    livePrices  = livePrices  || {};
-    var navMap          = mfResult.navMap          || {};
+  // mfResult: { navMap: { schemeCode → {nav,navDate} }, zerodhaSymToCode: {sym→code} }
+  // d.live_stock_prices: { symbol → price } — comes from Apps Script TwelveData call
+  function compute(d, mfResult) {
+    mfResult = mfResult || { navMap: {}, zerodhaSymToCode: {} };
+    var navMap           = mfResult.navMap          || {};
     var zerodhaSymToCode = mfResult.zerodhaSymToCode || {};
-    var mfCodeMap       = d.mf_codes              || {};
+    var mfCodeMap        = d.mf_codes              || {};
+    var livePrices       = d.live_stock_prices      || {};   // ← from Apps Script
 
-    var lp        = d.live_prices       || {};
-    var assets    = d.assets            || [];
-    var zHold     = d.zerodha_holdings  || [];
-    var vHold     = d.vested_holdings   || [];
-    var manAssets = d.manual_assets     || [];
-    var soldStocks = d.sold_stocks      || [];
-    var monthlyPnl = d.monthly_pnl      || [];
-    var snap      = d.latest_snapshot   || {};
+    var lp         = d.live_prices       || {};
+    var assets     = d.assets            || [];
+    var zHold      = d.zerodha_holdings  || [];
+    var vHold      = d.vested_holdings   || [];
+    var manAssets  = d.manual_assets     || [];
+    var soldStocks = d.sold_stocks       || [];
+    var monthlyPnl = d.monthly_pnl       || [];
+    var snap       = d.latest_snapshot   || {};
 
     var usdinr = (lp['FX_USDINR'] && lp['FX_USDINR'].price > 0)
       ? lp['FX_USDINR'].price : CONFIG.FALLBACK_USDINR;
@@ -354,15 +277,14 @@ var Data = (function() {
       return h.symbol.slice(-3) !== '-RR' && ETF_SYMS.indexOf(h.symbol) < 0;
     });
 
-    // ── LIVE LTP — NSE rows ───────────────────────────────
-    // _liveLTP is always in INR (TwelveData returns local currency for NSE).
-    // REITs stored as "BIRET-RR" — TwelveData might serve as "BIRET" — try both.
+    // ── LIVE LTP — NSE rows (from Apps Script TwelveData) ─
+    // Apps Script stores REITs bare (BIRET not BIRET-RR) — try both.
     function annotateNse(h) {
       var sym  = String(h.symbol || '');
-      var bare = sym.replace(/-RR$/, '');             // strip REIT suffix
+      var bare = sym.replace(/-RR$/, '');
       var ltp  = livePrices[sym] || livePrices[bare];
       if (!ltp || ltp <= 0) return;
-      var qty      = parseFloat(h.quantity   || 0);
+      var qty      = parseFloat(h.quantity    || 0);
       var invested = parseFloat(h.invested_inr || 0);
       h._liveLTP     = ltp;
       h._liveCurrent = ltp * qty;
@@ -373,12 +295,12 @@ var Data = (function() {
     zReits.forEach(annotateNse);
     zEtfs.forEach(annotateNse);
 
-    // ── LIVE LTP — Vested (USD) ───────────────────────────
+    // ── LIVE LTP — Vested rows (USD prices from Apps Script) ─
     vHold.forEach(function(h) {
       var p = livePrices[h.symbol];
       if (!p || p <= 0) return;
-      var qty     = parseFloat(h.quantity    || 0);
-      var inv     = parseFloat(h.invested_usd || 0);
+      var qty = parseFloat(h.quantity    || 0);
+      var inv = parseFloat(h.invested_usd || 0);
       h._liveLTP     = p;
       h._liveCurrent = p * qty;
       h._livePnl     = h._liveCurrent - inv;
@@ -410,8 +332,8 @@ var Data = (function() {
     var manMFCurrent = 0, manMFInvested = 0;
     manList.forEach(function(m) {
       if (!m.asset_id || m.asset_id.indexOf('MF_') < 0) return;
-      var code    = mfCodeMap[m.asset_id] ? String(mfCodeMap[m.asset_id]).trim() : '';
-      var units   = parseFloat(m.quantity     || 0);
+      var code     = mfCodeMap[m.asset_id] ? String(mfCodeMap[m.asset_id]).trim() : '';
+      var units    = parseFloat(m.quantity      || 0);
       var invested = parseFloat(m.invested_amount || 0);
       manMFInvested += invested;
       if (code && navMap[code]) {
@@ -422,7 +344,7 @@ var Data = (function() {
       }
     });
 
-    // ── TOTALS (live values preferred) ────────────────────
+    // ── TOTALS ────────────────────────────────────────────
     var zEquityTotal = zEquityRows.reduce(function(s, h) {
       return {
         invested: s.invested + (parseFloat(h.invested_inr) || 0),
@@ -444,7 +366,6 @@ var Data = (function() {
     var zTotal = {
       invested: zEquityTotal.invested + mfTotal.invested - manMFInvested,
       current:  zEquityTotal.current  + mfTotal.current  - manMFCurrent,
-      pnl:      0,
     };
     zTotal.pnl = zTotal.current - zTotal.invested;
 
@@ -462,7 +383,6 @@ var Data = (function() {
     vTotal.pnl_inr      = vTotal.pnl_usd      * usdinr;
 
     // ── COMMODITY / FI / RETIREMENT ───────────────────────
-    // Business Insider IMPORTHTML → USD/oz price for gold and silver
     var xauUSD = (lp['FX_XAUINR'] && lp['FX_XAUINR'].price > 100) ? lp['FX_XAUINR'].price : 0;
     var xagUSD = (lp['FX_XAGINR'] && lp['FX_XAGINR'].price > 1)   ? lp['FX_XAGINR'].price : 0;
     var goldPerGram   = xauUSD > 0 ? (xauUSD * usdinr) / 31.1035 : 0;
@@ -530,7 +450,7 @@ var Data = (function() {
     var nLiveMFNavs = Object.keys(navMap).length;
 
     console.log('[Data] compute done | live prices:', nLivePrices,
-      '| MF NAVs:', nLiveMFNavs,
+      '(from Apps Script) | MF NAVs:', nLiveMFNavs,
       '| goldPerGram:', goldPerGram.toFixed(0));
     console.log('[Data] totalCurrent:', totalCurrent.toFixed(0),
       '| totalInvested:', totalInvested.toFixed(0));
