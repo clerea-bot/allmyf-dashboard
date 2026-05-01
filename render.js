@@ -175,6 +175,16 @@ const Render = (() => {
 
     document.getElementById('summary-content').innerHTML = html;
 
+    // Inject live price dot style (used in India + Global tabs)
+    if (!document.getElementById('live-dot-style')) {
+      const s = document.createElement('style');
+      s.id = 'live-dot-style';
+      s.textContent = `
+        .live-dot { color: #22c55e; font-size: 0.55rem; vertical-align: super; margin-left: 2px; }
+      `;
+      document.head.appendChild(s);
+    }
+
     // Draw donut
     const ctx = document.getElementById('donut-chart')?.getContext('2d');
     if (ctx) {
@@ -207,44 +217,31 @@ const Render = (() => {
     const equityInvested = d.zEquityStocks.reduce((s, h) => s + parseFloat(h.invested_inr || 0), 0);
     const equityCurrent  = d.zEquityStocks.reduce((s, h) => s + parseFloat(h.current_value_inr || 0), 0);
 
-    // Equity table rows (stocks)
-    const stockRows = d.zEquityStocks.map(h => `
-      <tr>
-        <td class="symbol">${h.symbol}</td>
-        <td class="right">${fmt(h.quantity)}</td>
-        <td class="right">₹${fmt(parseFloat(h.avg_cost_inr), 2)}</td>
-        <td class="right">₹${fmt(parseFloat(h.ltp_inr), 2)}</td>
-        <td class="right gold">₹${fmt(parseFloat(h.invested_inr), 0)}</td>
-        <td class="right">₹${fmt(parseFloat(h.current_value_inr), 0)}</td>
-        <td class="right ${pnlClass(h.pnl_inr)}">₹${fmt(parseFloat(h.pnl_inr), 0)}</td>
-        <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
-      </tr>`).join('');
+    // Helper: render an NSE equity/ETF/REIT row with live LTP when available
+    // h._liveLTP / h._liveCurrent / h._livePnl set by data.js from TwelveData
+    const nseRow = (h, tag) => {
+      const hasLive  = h._liveLTP !== undefined;
+      const ltp      = hasLive ? h._liveLTP     : parseFloat(h.ltp_inr);
+      const curr     = hasLive ? h._liveCurrent : parseFloat(h.current_value_inr);
+      const pnl      = hasLive ? h._livePnl     : parseFloat(h.pnl_inr);
+      const pct      = hasLive ? h._livePct     : parseFloat(h.net_change_pct);
+      const ltpCell  = `₹${fmt(ltp, 2)}${hasLive ? ' <span class="live-dot" title="Live price">●</span>' : ''}`;
+      return `
+        <tr>
+          <td class="symbol">${h.symbol}${tag ? ` <span class="tag tag-${tag}">${tag.toUpperCase()}</span>` : ''}</td>
+          <td class="right">${fmt(h.quantity)}</td>
+          <td class="right">₹${fmt(parseFloat(h.avg_cost_inr), 2)}</td>
+          <td class="right">${ltpCell}</td>
+          <td class="right gold">₹${fmt(parseFloat(h.invested_inr), 0)}</td>
+          <td class="right">₹${fmt(curr, 0)}</td>
+          <td class="right ${pnlClass(pnl)}">₹${fmt(pnl, 0)}</td>
+          <td class="right ${pnlClass(pct)}">${pct !== null ? pctStr(pct) : '—'}</td>
+        </tr>`;
+    };
 
-    // REIT rows
-    const reitRows = d.zReits.map(h => `
-      <tr>
-        <td class="symbol">${h.symbol} <span class="tag tag-reit">REIT</span></td>
-        <td class="right">${fmt(h.quantity)}</td>
-        <td class="right">₹${fmt(parseFloat(h.avg_cost_inr), 2)}</td>
-        <td class="right">₹${fmt(parseFloat(h.ltp_inr), 2)}</td>
-        <td class="right gold">₹${fmt(parseFloat(h.invested_inr), 0)}</td>
-        <td class="right">₹${fmt(parseFloat(h.current_value_inr), 0)}</td>
-        <td class="right ${pnlClass(h.pnl_inr)}">₹${fmt(parseFloat(h.pnl_inr), 0)}</td>
-        <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
-      </tr>`).join('');
-
-    // ETF rows
-    const etfRows = d.zEtfs.map(h => `
-      <tr>
-        <td class="symbol">${h.symbol} <span class="tag tag-etf">ETF</span></td>
-        <td class="right">${fmt(h.quantity)}</td>
-        <td class="right">₹${fmt(parseFloat(h.avg_cost_inr), 2)}</td>
-        <td class="right">₹${fmt(parseFloat(h.ltp_inr), 2)}</td>
-        <td class="right gold">₹${fmt(parseFloat(h.invested_inr), 0)}</td>
-        <td class="right">₹${fmt(parseFloat(h.current_value_inr), 0)}</td>
-        <td class="right ${pnlClass(h.pnl_inr)}">₹${fmt(parseFloat(h.pnl_inr), 0)}</td>
-        <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
-      </tr>`).join('');
+    const stockRows = d.zEquityStocks.map(h => nseRow(h, null)).join('');
+    const reitRows  = d.zReits.map(h => nseRow(h, 'reit')).join('');
+    const etfRows   = d.zEtfs.map(h => nseRow(h, 'etf')).join('');
 
     // ── ZERODHA MF ROWS — live NAV from mfapi when available ──
     // h._liveNAV / h._liveCurrent are set by compute() if mfapi matched the fund name.
@@ -372,18 +369,26 @@ const Render = (() => {
   function renderGlobal(d) {
     const vHold = d.vHold;
 
-    const rowHtml = (h) => `
-      <tr>
-        <td class="symbol">${h.symbol}</td>
-        <td class="company" title="${h.company_name}">${h.company_name}</td>
-        <td class="right">${fmt(parseFloat(h.quantity), 4)}</td>
-        <td class="right">$${fmt(parseFloat(h.avg_cost_usd), 2)}</td>
-        <td class="right">$${fmt(parseFloat(h.ltp_usd), 2)}</td>
-        <td class="right gold">$${fmt(parseFloat(h.invested_usd), 2)}</td>
-        <td class="right">$${fmt(parseFloat(h.current_value_usd), 2)}</td>
-        <td class="right ${pnlClass(h.pnl_usd)}">$${fmt(parseFloat(h.pnl_usd), 2)}</td>
-        <td class="right ${pnlClass(h.pnl_pct)}">${pctStr(h.pnl_pct)}</td>
-      </tr>`;
+    const rowHtml = (h) => {
+      const hasLive  = h._liveLTP !== undefined;
+      const price    = hasLive ? h._liveLTP     : parseFloat(h.ltp_usd);
+      const curr     = hasLive ? h._liveCurrent : parseFloat(h.current_value_usd);
+      const pnl      = hasLive ? h._livePnl     : parseFloat(h.pnl_usd);
+      const pct      = hasLive ? h._livePct     : parseFloat(h.pnl_pct);
+      const priceCell = `$${fmt(price, 2)}${hasLive ? ' <span class="live-dot" title="Live price">●</span>' : ''}`;
+      return `
+        <tr>
+          <td class="symbol">${h.symbol}</td>
+          <td class="company" title="${h.company_name}">${h.company_name}</td>
+          <td class="right">${fmt(parseFloat(h.quantity), 4)}</td>
+          <td class="right">$${fmt(parseFloat(h.avg_cost_usd), 2)}</td>
+          <td class="right">${priceCell}</td>
+          <td class="right gold">$${fmt(parseFloat(h.invested_usd), 2)}</td>
+          <td class="right">$${fmt(curr, 2)}</td>
+          <td class="right ${pnlClass(pnl)}">$${fmt(pnl, 2)}</td>
+          <td class="right ${pnlClass(pct)}">${pctStr(pct)}</td>
+        </tr>`;
+    };
 
     const th = `<tr>
       <th onclick="Render.sortTable('vested-tbl',0)">Ticker<span class="sort-icon">⇅</span></th>

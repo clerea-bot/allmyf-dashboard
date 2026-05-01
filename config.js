@@ -18,6 +18,16 @@ const CONFIG = {
   // Cache API response for N seconds (reduces Apps Script quota usage)
   CACHE_SECONDS: 300,
 
+  // Live stock price cache (TwelveData) — 30 minutes
+  // Free plan: 800 credits/day. With ~120 symbols, this allows ~6 full refreshes/day.
+  // Extend to 3600 (1 hour) if you hit the daily limit.
+  LIVE_PRICE_CACHE_SECONDS: 1800,
+
+  // TwelveData API key — free tier, 800 credits/day
+  // Provides live LTP for Indian (NSE) and US stocks.
+  // Replace if key is rotated: https://twelvedata.com/account/api-keys
+  TWELVEDATA_KEY: '49f53091930e4bd8bcdd338a859e030a',
+
   // USD/INR fallback rate if live price unavailable
   // Update this each time the rate moves significantly (current: May 2026)
   FALLBACK_USDINR: 94.5,
@@ -26,5 +36,5 @@ const CONFIG = {
   OWNER_NAME: 'AllMyF',
 
   // App version
-  VERSION: '3.0.0',
+  VERSION: '4.0.0',
 };
