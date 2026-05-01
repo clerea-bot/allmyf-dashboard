@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // AllMyF — Render Module
-// Builds all tab HTML from computed data
+// Phase 5: live NAV rows, gold/silver USD fix, month label fix
 // ═══════════════════════════════════════════════════════════════
 
 const Render = (() => {
@@ -57,9 +57,58 @@ const Render = (() => {
     return s;
   }
 
+  // ── MONTH LABEL HELPERS ───────────────────────────────────
+  // Root cause of "showing March instead of April":
+  // When a cell is date-typed in Google Sheets and Apps Script serialises it
+  // via JSON.stringify(), it becomes an ISO UTC string e.g. "2026-03-31T18:30:00.000Z"
+  // (April 1 IST = March 31 UTC at 18:30 in India's UTC+5:30 timezone).
+  // Splitting on "-" gives month "03" → March.  Fix: add IST offset before extracting month.
+  //
+  // Both helpers gracefully handle plain "YYYY-MM" strings (text-typed cells).
+
+  const MON_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Returns "Apr '26" format (used in chart labels)
+  function fmtMonthShort(raw) {
+    const { y, m } = _parseMonth(raw);
+    if (y === null) return String(raw || '');
+    return MON_SHORT[m] + ' \'' + String(y).slice(2);
+  }
+
+  // Returns "Apr 2026" format (used in card labels)
+  function fmtMonthLong(raw) {
+    const { y, m } = _parseMonth(raw);
+    if (y === null) return String(raw || '');
+    return MON_SHORT[m] + ' ' + y;
+  }
+
+  // Internal: parses raw month value, returns { y: number, m: 0-indexed } or { y: null, m: null }
+  function _parseMonth(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return { y: null, m: null };
+
+    if (s.includes('T')) {
+      // ISO datetime from Sheets date cell — convert to IST (+5:30) before reading month
+      const utcMs = new Date(s).getTime();
+      if (isNaN(utcMs)) return { y: null, m: null };
+      const istMs = utcMs + 5.5 * 60 * 60 * 1000;
+      const d = new Date(istMs);
+      return { y: d.getUTCFullYear(), m: d.getUTCMonth() };   // getUTCMonth is 0-indexed
+    }
+
+    // Plain "YYYY-MM" string
+    const parts = s.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;   // convert to 0-indexed
+    if (isNaN(y) || isNaN(m)) return { y: null, m: null };
+    return { y, m };
+  }
+
   // ── SUMMARY TAB ───────────────────────────────────────────
   function renderSummary(d) {
     const totalPnl = d.totalCurrent - d.totalInvested;
+    // Dynamic label: derives month from latest P&L row (handles date-cell timezone bug)
+    const pnlLabel = d.latestPnl.month ? fmtMonthLong(d.latestPnl.month) + ' Realized' : 'Realized P&L';
 
     const cards = [
       { label: 'Total Portfolio Value', value: fmtInr(d.totalCurrent, true), cls: 'gold big', sub: `vs ₹${fmtInr(d.totalInvested,true).replace('₹','')} invested` },
@@ -71,7 +120,7 @@ const Render = (() => {
       { label: 'Fixed Income', value: fmtInr(d.fiVal, true), cls: '', sub: 'Bonds · FDs · RD' },
       { label: 'Retirement', value: fmtInr(d.retirementVal, true), cls: '', sub: 'eNPS · APY · EPFO' },
       { label: 'USD/INR Rate', value: `₹${fmt(d.usdinr, 2)}`, cls: 'muted', sub: 'Live via Google Finance' },
-      { label: 'Apr 2026 Realized', value: fmtInr(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0) + parseFloat(d.latestPnl.vested_realized_pnl_inr || 0), true), cls: pnlClass(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0)), sub: `Zerodha + Vested · ${fmtInr(d.soldTotal, true)} lifetime realized` },
+      { label: pnlLabel, value: fmtInr(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0) + parseFloat(d.latestPnl.vested_realized_pnl_inr || 0), true), cls: pnlClass(parseFloat(d.latestPnl.zerodha_realized_pnl_inr || 0)), sub: `Zerodha + Vested · ${fmtInr(d.soldTotal, true)} lifetime realized` },
     ];
 
     const cardsHtml = `
@@ -197,18 +246,29 @@ const Render = (() => {
         <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
       </tr>`).join('');
 
-    // MF rows
-    const mfRows = d.mfRows.map(h => `
-      <tr>
-        <td class="company" style="max-width:300px" title="${h.symbol}">${h.symbol}</td>
-        <td class="right">${fmt(parseFloat(h.quantity), 3)}</td>
-        <td class="right">₹${fmt(parseFloat(h.avg_cost_inr), 4)}</td>
-        <td class="right">₹${fmt(parseFloat(h.ltp_inr), 4)}</td>
-        <td class="right gold">₹${fmt(parseFloat(h.invested_inr), 0)}</td>
-        <td class="right">₹${fmt(parseFloat(h.current_value_inr), 0)}</td>
-        <td class="right ${pnlClass(h.pnl_inr)}">₹${fmt(parseFloat(h.pnl_inr), 0)}</td>
-        <td class="right ${pnlClass(h.net_change_pct)}">${pctStr(h.net_change_pct)}</td>
-      </tr>`).join('');
+    // ── ZERODHA MF ROWS — live NAV from mfapi when available ──
+    // h._liveNAV / h._liveCurrent are set by compute() if mfapi matched the fund name.
+    // Falls back to ltp_inr / current_value_inr from the monthly snapshot.
+    const mfRows = d.mfRows.map(h => {
+      const avgNAV    = parseFloat(h.avg_cost_inr);
+      const liveNAV   = h._liveNAV !== undefined ? h._liveNAV : parseFloat(h.ltp_inr);
+      const liveCurr  = h._liveCurrent !== undefined ? h._liveCurrent : parseFloat(h.current_value_inr);
+      const invested  = parseFloat(h.invested_inr || 0);
+      const livePnl   = liveCurr - invested;
+      const livePct   = invested > 0 ? (livePnl / invested) * 100 : null;
+      const navSrc    = h._liveNAV !== undefined ? '' : '';  // no badge; data speaks for itself
+      return `
+        <tr>
+          <td class="company" style="max-width:300px" title="${h.symbol}">${h.symbol}</td>
+          <td class="right">${fmt(parseFloat(h.quantity), 3)}</td>
+          <td class="right">₹${fmt(avgNAV, 4)}</td>
+          <td class="right">₹${fmt(liveNAV, 4)}</td>
+          <td class="right gold">₹${fmt(invested, 0)}</td>
+          <td class="right">₹${fmt(liveCurr, 0)}</td>
+          <td class="right ${pnlClass(livePnl)}">₹${fmt(livePnl, 0)}</td>
+          <td class="right ${livePct !== null ? pnlClass(livePct) : ''}">${livePct !== null ? pctStr(livePct) : '—'}</td>
+        </tr>`;
+    }).join('');
 
     // India equity headers — use sortTableGrouped to keep Stocks/REITs/ETFs separate
     const thRow = `
@@ -223,22 +283,35 @@ const Render = (() => {
         <th class="right" onclick="Render.sortTableGrouped('india-tbl',7)">Day %<span class="sort-icon">⇅</span></th>
       </tr>`;
 
-    // Non-Zerodha MF rows from manual_assets (live NAV in Phase 5)
+    // ── NON-ZERODHA MF ROWS — live NAV from mfapi ─────────────
+    // m._liveNAV / m._liveCurrent set by compute() via mfCodeMap + mfNavs.
+    // Shows "—" in live columns if mfapi was offline or scheme code not found.
     const manMFs = d.manList.filter(m => m.asset_id?.startsWith('MF_'));
     const manMFRows = manMFs.map(m => {
       const units    = parseFloat(m.quantity || 0);
       const invested = parseFloat(m.invested_amount || 0);
+      const avgNAV   = units > 0 ? invested / units : 0;
+      const liveNAV  = m._liveNAV || 0;
+      const liveCurr = m._liveCurrent || 0;
+      const livePnl  = liveCurr > 0 ? liveCurr - invested : 0;
+      const livePct  = invested > 0 && liveCurr > 0 ? (livePnl / invested) * 100 : null;
+      const hasLive  = liveNAV > 0;
       return `
         <tr>
           <td class="company" style="max-width:280px" title="${m.asset_name}">${m.asset_name}</td>
           <td class="right">${fmt(units, 3)}</td>
+          <td class="right">₹${fmt(avgNAV, 4)}</td>
+          <td class="right">${hasLive ? '₹' + fmt(liveNAV, 4) : '<span class="muted">—</span>'}</td>
           <td class="right gold">₹${fmt(invested, 0)}</td>
-          <td class="right muted">—</td>
-          <td class="right muted">—</td>
-          <td class="right muted">—</td>
-          <td class="right muted"><span class="tag tag-etf">NAV · Ph5</span></td>
+          <td class="right">${hasLive ? '₹' + fmt(liveCurr, 0) : '<span class="muted">—</span>'}</td>
+          <td class="right ${hasLive ? pnlClass(livePnl) : ''}">${hasLive ? '₹' + fmt(livePnl, 0) : '<span class="muted">—</span>'}</td>
+          <td class="right ${hasLive && livePct !== null ? pnlClass(livePct) : ''}">${hasLive && livePct !== null ? pctStr(livePct) : '<span class="muted">—</span>'}</td>
         </tr>`;
     }).join('');
+
+    // Badge shows live NAV count (or falls back to "mfapi.in" label)
+    const liveMFCount = manMFs.filter(m => m._liveNAV).length;
+    const manMFBadge  = liveMFCount > 0 ? `${liveMFCount}/${manMFs.length} live NAVs` : 'mfapi.in';
 
     const html = `
       ${sectionHeader('India Equity & ETFs', d.zEquityRows?.length || d.zEquityStocks.length + d.zReits.length + d.zEtfs.length)}
@@ -267,26 +340,27 @@ const Render = (() => {
               <th class="right" onclick="Render.sortTable('mf-tbl',4)">Invested<span class="sort-icon">⇅</span></th>
               <th class="right" onclick="Render.sortTable('mf-tbl',5)">Current<span class="sort-icon">⇅</span></th>
               <th class="right" onclick="Render.sortTable('mf-tbl',6)">P&amp;L<span class="sort-icon">⇅</span></th>
-              <th class="right" onclick="Render.sortTable('mf-tbl',7)">Change %<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('mf-tbl',7)">Return %<span class="sort-icon">⇅</span></th>
             </tr></thead>
             <tbody>${mfRows}</tbody>
           </table>
         </div>
       </div>
-      ${sectionHeader('Mutual Funds — Other Platforms', manMFs.length, 'Live NAV · Phase 5')}
+      ${sectionHeader('Mutual Funds — Other Platforms', manMFs.length, manMFBadge)}
       <div class="table-wrap">
         <div class="table-inner">
           <table id="manmf-tbl">
             <thead><tr>
               <th onclick="Render.sortTable('manmf-tbl',0)">Fund Name<span class="sort-icon">⇅</span></th>
               <th class="right" onclick="Render.sortTable('manmf-tbl',1)">Units<span class="sort-icon">⇅</span></th>
-              <th class="right" onclick="Render.sortTable('manmf-tbl',2)">Invested<span class="sort-icon">⇅</span></th>
-              <th class="right">Current</th>
-              <th class="right">P&amp;L</th>
-              <th class="right">Change %</th>
-              <th class="right">Status</th>
+              <th class="right">Avg NAV</th>
+              <th class="right">Live NAV</th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',4)">Invested<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',5)">Current<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',6)">P&amp;L<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('manmf-tbl',7)">Return %<span class="sort-icon">⇅</span></th>
             </tr></thead>
-            <tbody>${manMFRows || `<tr><td colspan="7" class="empty-state">No non-Zerodha MF data</td></tr>`}</tbody>
+            <tbody>${manMFRows || `<tr><td colspan="8" class="empty-state">No non-Zerodha MF data</td></tr>`}</tbody>
           </table>
         </div>
       </div>`;
@@ -348,23 +422,21 @@ const Render = (() => {
         <div class="table-inner">
           <table id="vested-tbl">
             <thead>${th}</thead>
-            <tbody>
-              ${vHold.map(rowHtml).join('')}
-            </tbody>
+            <tbody>${vHold.map(rowHtml).join('')}</tbody>
           </table>
         </div>
       </div>
-      ${sectionHeader('European Funds', euFunds.length, 'Via Vested — manual update')}
+      ${sectionHeader('European Funds', euFunds.length, 'Manual · Vested')}
       <div class="table-wrap">
         <div class="table-inner">
           <table>
             <thead><tr>
-              <th>Fund Name</th>
-              <th class="right">Invested (USD)</th>
-              <th class="right">Current (USD)</th>
-              <th class="right">Current (INR)</th>
-              <th class="right">P&amp;L (USD)</th>
-              <th class="right">FX Rate Used</th>
+              <th>Fund</th>
+              <th class="right">Invested $</th>
+              <th class="right">Current $</th>
+              <th class="right">Current ₹</th>
+              <th class="right">P&amp;L $</th>
+              <th class="right">FX Used</th>
             </tr></thead>
             <tbody>${euRows || `<tr><td colspan="6" class="empty-state">No European fund data</td></tr>`}</tbody>
           </table>
@@ -381,11 +453,17 @@ const Render = (() => {
     const rds   = d.manList.filter(m => m.asset_id?.includes('RD'));
     const comms = d.manList.filter(m => m.asset_id?.includes('COMMODITY'));
 
-    // Live gold/silver per gram (from Google Finance formula in live_prices sheet)
-    const xauPrice = d.lp?.FX_XAUINR?.price;
-    const xagPrice = d.lp?.FX_XAGINR?.price;
-    const goldPerGram   = (xauPrice   && xauPrice   > 100) ? xauPrice   / 31.1035 : 0;
-    const silverPerGram = (xagPrice && xagPrice > 0.5)  ? xagPrice / 31.1035 : 0;
+    // ── GOLD / SILVER LIVE PRICE ───────────────────────────────
+    // Business Insider formulas return price in USD per troy oz.
+    // FX_XAUINR / FX_XAGINR asset_ids hold USD prices (legacy naming; actual value is USD).
+    // Conversion: (USD/troy oz) × (INR/USD) / 31.1035 = INR per gram
+    const xauUSD = d.lp?.FX_XAUINR?.price || 0;
+    const xagUSD = d.lp?.FX_XAGINR?.price || 0;
+    const usdinr = d.usdinr || 84.5;
+    // xauUSD is ~3200 (reasonable range for gold USD/oz)
+    const goldPerGram   = (xauUSD > 100)  ? (xauUSD * usdinr) / 31.1035 : 0;
+    // xagUSD is ~30 (reasonable range for silver USD/oz)
+    const silverPerGram = (xagUSD > 1)    ? (xagUSD * usdinr) / 31.1035 : 0;
 
     // Commodity rows
     const commRow = (m) => {
@@ -438,9 +516,10 @@ const Render = (() => {
 
     const blankRow = `<tr><td colspan="6" class="empty-state">No data — check manual_assets tab</td></tr>`;
 
+    // Live price note: shows computed INR/gram values so user can verify the USD→INR conversion
     const liveNote = goldPerGram > 0
-      ? `Live gold ₹${fmt(goldPerGram, 0)}/g · silver ₹${fmt(silverPerGram, 2)}/g`
-      : 'Live prices not yet available — add GOOGLEFINANCE formulas to live_prices tab';
+      ? `Live gold ₹${fmt(goldPerGram, 0)}/g · silver ₹${fmt(silverPerGram, 0)}/g`
+      : 'Prices not loaded — check FX_XAUINR / FX_XAGINR in live_prices sheet';
 
     const html = `
       ${sectionHeader('Commodities', comms.length, liveNote)}
@@ -578,24 +657,22 @@ const Render = (() => {
 
     document.getElementById('history-content').innerHTML = html;
 
-    // Draw monthly P&L chart — Zerodha realized only
+    // ── MONTHLY P&L CHART ──────────────────────────────────────
+    // Labels: uses fmtMonthShort() which handles the timezone offset bug
+    // (Sheets date cell → UTC ISO string → wrong month without IST correction).
+    // Chart shows Zerodha realized P&L only, as requested.
     if (pnlData.length > 0) {
       const ctx = document.getElementById('pnl-chart')?.getContext('2d');
       if (ctx) {
         if (_pnlChart) _pnlChart.destroy();
-        const labels = pnlData.map(p => {
-          const [y, m] = (p.month || '').split('-');
-          if (!y || !m) return p.month || '';
-          const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10)-1] || m;
-          return mon + ' \'' + y.slice(2);
-        });
+        const labels    = pnlData.map(p => fmtMonthShort(p.month));
         const zRealized = pnlData.map(p => parseFloat(p.zerodha_realized_pnl_inr || 0));
         _pnlChart = new Chart(ctx, {
           type: 'bar',
           data: {
             labels,
             datasets: [
-              { label: 'Realized (₹)', data: zRealized, backgroundColor: 'rgba(45,95,168,0.72)', borderRadius: 4 },
+              { label: 'Zerodha Realized P&L (₹)', data: zRealized, backgroundColor: 'rgba(45,95,168,0.72)', borderRadius: 4 },
             ]
           },
           options: {
@@ -670,8 +747,6 @@ const Render = (() => {
   }
 
   // ── SORT TABLE GROUPED (group-aware — for India Equity) ───
-  // Sorts data rows within each subsec group independently,
-  // so Stocks, REITs, and ETFs always stay visually separated.
   function sortTableGrouped(tableId, colIdx) {
     const tbl = document.getElementById(tableId);
     if (!tbl) return;
@@ -679,7 +754,6 @@ const Render = (() => {
     const asc = _sortState[key] !== true;
     _sortState[key] = asc;
 
-    // Update header sort indicators
     tbl.querySelectorAll('th').forEach((th, i) => {
       th.classList.toggle('sorted', i === colIdx);
       const icon = th.querySelector('.sort-icon');
@@ -689,7 +763,6 @@ const Render = (() => {
     const tbody = tbl.querySelector('tbody');
     const allRows = [...tbody.children];
 
-    // Collect groups: each group = { header: subsec-row, rows: [...data rows] }
     const groups = [];
     let current = null;
     allRows.forEach(row => {
@@ -701,7 +774,6 @@ const Render = (() => {
       }
     });
 
-    // Parse cell value for comparison
     const cellVal = (row) => {
       const cell = row.cells[colIdx];
       if (!cell) return '';
@@ -710,7 +782,6 @@ const Render = (() => {
       return isNaN(n) ? txt : n;
     };
 
-    // Sort each group's rows independently
     groups.forEach(g => {
       g.rows.sort((a, b) => {
         const av = cellVal(a), bv = cellVal(b);
@@ -719,7 +790,6 @@ const Render = (() => {
       });
     });
 
-    // Re-append groups in order: subsec-row → sorted data rows
     groups.forEach(g => {
       tbody.appendChild(g.header);
       g.rows.forEach(r => tbody.appendChild(r));
