@@ -255,6 +255,7 @@ var Data = (function() {
     var vHold      = d.vested_holdings   || [];
     var manAssets  = d.manual_assets     || [];
     var soldStocks = d.sold_stocks       || [];
+    var watchlist  = d.watchlist         || [];
     var monthlyPnl = d.monthly_pnl       || [];
 
     // ── ANNOTATE SOLD STOCKS — opportunity cost + tax fields ──────
@@ -291,6 +292,32 @@ var Data = (function() {
         s._verdict         = 'NO_DATA';
       }
     });
+
+    // ── ANNOTATE WATCHLIST — live price + move since add_date ────
+    watchlist.forEach(function(w) {
+      var ticker   = String(w.ticker || '').trim();
+      var startPx  = parseFloat(w.start_price)   || 0;
+      var targetPx = parseFloat(w.target_price)  || 0;
+      // Prefer livePrices (fresh from GOOGLEFINANCE) over sheet formula result
+      var livePx   = livePrices[ticker] || 0;
+      var sheetPx  = parseFloat(w.current_price) || 0;
+      var currPx   = livePx > 0 ? livePx : sheetPx;
+      w._currentPrice = currPx > 0 ? currPx : null;
+      if (currPx > 0 && startPx > 0) {
+        w._pnlAbs = currPx - startPx;
+        w._pnlPct = (currPx - startPx) / startPx * 100;
+      } else {
+        w._pnlAbs = null;
+        w._pnlPct = null;
+      }
+      // Target gap: how far current is from target (negative = below target)
+      w._targetGap = (currPx > 0 && targetPx > 0)
+        ? (targetPx - currPx) / currPx * 100
+        : null;
+      w._active = !w.remove_date && w.status !== 'bought' && w.status !== 'dropped';
+    });
+    var watchlistActive = watchlist.filter(function(w) { return w._active; });
+
     var snap       = d.latest_snapshot   || {};
 
     var usdinr = (lp['FX_USDINR'] && lp['FX_USDINR'].price > 0)
@@ -500,6 +527,7 @@ var Data = (function() {
       alloc, allocTotal,
       latestPnl,
       soldStocks, soldTotal,
+      watchlist, watchlistActive,
       monthlyPnl, snap,
       stockAlerts: d.stock_alerts || [],
       nLivePrices, nLiveMFNavs,

@@ -942,6 +942,134 @@ const Render = (() => {
     }
   }
 
+  // ── WATCHLIST TAB ────────────────────────────────────────────
+  function renderWatchlist(d) {
+    const active  = d.watchlistActive || [];
+    const all     = d.watchlist       || [];
+    const exited  = all.filter(w => !w._active);
+
+    // Inject status badge styles once
+    if (!document.getElementById('watchlist-styles')) {
+      const style = document.createElement('style');
+      style.id = 'watchlist-styles';
+      style.textContent = `
+        .wl-badge {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 0.78rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        .wl-watching { background: rgba(45,95,168,0.10);  color: #2d5fa8; }
+        .wl-bought   { background: rgba(26,122,60,0.10);  color: #1a7a3c; }
+        .wl-dropped  { background: rgba(160,150,140,0.12);color: #7a7065; }
+        .wl-mkt      { font-size: 0.72rem; padding: 1px 6px; border-radius: 3px;
+                        background: var(--bg3); color: var(--muted); }
+        .wl-thesis   { font-size: 0.80rem; color: var(--muted); max-width: 240px;
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function statusBadge(w) {
+      const s = w.status || 'watching';
+      const cls = s === 'bought' ? 'wl-bought' : s === 'dropped' ? 'wl-dropped' : 'wl-watching';
+      return `<span class="wl-badge ${cls}">${s}</span>`;
+    }
+
+    function activeRow(w) {
+      const currStr = w._currentPrice !== null
+        ? (w.currency === 'USD' ? `$${fmt(w._currentPrice, 2)}` : `₹${fmt(w._currentPrice, 2)}`)
+        : '<span class="muted">—</span>';
+      const pnlStr = w._pnlPct !== null
+        ? `<span class="${w._pnlPct >= 0 ? 'pos' : 'neg'}">${pctStr(w._pnlPct)}</span>`
+        : '<span class="muted">—</span>';
+      const targetStr = w.target_price
+        ? (w.currency === 'USD' ? `$${fmt(parseFloat(w.target_price), 2)}` : `₹${fmt(parseFloat(w.target_price), 2)}`)
+        : '<span class="muted">—</span>';
+      const gapStr = w._targetGap !== null
+        ? `<span class="${w._targetGap >= 0 ? 'pos' : 'neg'}">${pctStr(w._targetGap)}</span>`
+        : '<span class="muted">—</span>';
+      return `
+        <tr>
+          <td><span class="symbol">${w.ticker || w.asset_name}</span>
+              <span class="wl-mkt">${w.market || ''}</span></td>
+          <td class="right">${w.currency === 'USD' ? `$${fmt(parseFloat(w.start_price||0),2)}` : `₹${fmt(parseFloat(w.start_price||0),2)}`}</td>
+          <td class="right">${currStr}</td>
+          <td class="right">${pnlStr}</td>
+          <td class="right">${targetStr}</td>
+          <td class="right">${gapStr}</td>
+          <td class="muted" style="font-size:0.78rem">${w.add_date ? fmtDate(w.add_date) : '—'}</td>
+          <td><div class="wl-thesis" title="${(w.thesis||'').replace(/"/g,"&quot;")}">${w.thesis || '<span class="muted">—</span>'}</div></td>
+          <td>${statusBadge(w)}</td>
+        </tr>`;
+    }
+
+    function exitedRow(w) {
+      return `
+        <tr>
+          <td><span class="symbol">${w.ticker || w.asset_name}</span>
+              <span class="wl-mkt">${w.market || ''}</span></td>
+          <td class="muted">${w.add_date    ? fmtDate(w.add_date)    : '—'}</td>
+          <td class="muted">${w.remove_date ? fmtDate(w.remove_date) : '—'}</td>
+          <td>${statusBadge(w)}</td>
+          <td class="muted wl-thesis">${w.notes || '<span class="muted">—</span>'}</td>
+        </tr>`;
+    }
+
+    const emptyState = `
+      <div class="empty-state" style="padding:60px 0;text-align:center">
+        <div style="font-size:2.5rem;margin-bottom:14px">👁️</div>
+        <div style="font-weight:500;margin-bottom:8px">No active watchlist items</div>
+        <div class="muted" style="font-size:0.85rem">
+          Add stocks to the watchlist via the AI workflow ("watch TICKER at ₹PRICE — thesis").
+        </div>
+      </div>`;
+
+    const html = `
+      ${sectionHeader('Watchlist — Active', active.length)}
+      <div class="table-wrap">
+        ${active.length > 0 ? tableControls('wl-active-tbl') : ''}
+        <div class="table-inner">
+          ${active.length > 0 ? `
+          <table id="wl-active-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('wl-active-tbl',0)">Ticker<span class="sort-icon">⇅</span></th>
+              <th class="right">Entry Px</th>
+              <th class="right">Curr Px</th>
+              <th class="right" onclick="Render.sortTable('wl-active-tbl',3)">Move %<span class="sort-icon">⇅</span></th>
+              <th class="right">Target</th>
+              <th class="right" onclick="Render.sortTable('wl-active-tbl',5)">To Target<span class="sort-icon">⇅</span></th>
+              <th onclick="Render.sortTable('wl-active-tbl',6)">Added<span class="sort-icon">⇅</span></th>
+              <th>Thesis</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody>${active.map(activeRow).join('')}</tbody>
+          </table>` : emptyState}
+        </div>
+      </div>
+      ${exited.length > 0 ? `
+      ${sectionHeader('Watchlist — Closed', exited.length)}
+      <div class="table-wrap">
+        ${tableControls('wl-exited-tbl')}
+        <div class="table-inner">
+          <table id="wl-exited-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('wl-exited-tbl',0)">Ticker<span class="sort-icon">⇅</span></th>
+              <th>Added</th>
+              <th>Closed</th>
+              <th>Outcome</th>
+              <th>Notes</th>
+            </tr></thead>
+            <tbody>${exited.map(exitedRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>` : ''}`;
+
+    document.getElementById('watchlist-content').innerHTML = html;
+  }
+
   // ── OPPORTUNITY COST TRACKER TAB ─────────────────────────────
   function renderOppCost(d) {
     const sold = d.soldStocks || [];
@@ -1089,6 +1217,7 @@ const Render = (() => {
     renderRetirement,
     renderHistory,
     renderAlerts,
+    renderWatchlist,
     renderOppCost,
     filterTable,
     sortTable,
