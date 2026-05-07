@@ -450,6 +450,23 @@ var Data = (function() {
     var goldPerGram   = xauUSD > 0 ? (xauUSD * usdinr) / 31.1035 : 0;
     var silverPerGram = xagUSD > 0 ? (xagUSD * usdinr) / 31.1035 : 0;
 
+    // Separate Vest rows (display-only — never included in totalCurrent or totalInvested)
+    var vestList = manList.filter(function(m) {
+      return m.asset_id && m.asset_id.indexOf('VEST_') === 0;
+    }).map(function(m) {
+      var inv  = parseFloat(m.invested_amount  || 0);
+      var curr = parseFloat(m.current_value    || 0);
+      var inr  = parseFloat(m.current_value_inr || 0);
+      var fx   = parseFloat(m.usd_inr_at_snapshot || 0);
+      return Object.assign({}, m, {
+        _investedUsd: inv,
+        _currentUsd:  curr,
+        _currentInr:  inr > 0 ? inr : (curr > 0 && fx > 0 ? Math.round(curr * fx) : 0),
+        _pnlUsd:  curr > 0 && inv > 0 ? curr - inv : null,
+        _pnlPct:  curr > 0 && inv > 0 ? (curr - inv) / inv * 100 : null,
+      });
+    });
+
     var commodityVal = manList.reduce(function(s, m) {
       if (!m.asset_id || m.asset_id.indexOf('COMMODITY') < 0) return s;
       var qty = parseFloat(m.quantity || 0);
@@ -519,7 +536,7 @@ var Data = (function() {
 
     return {
       raw: d, lp, usdinr, assets, assetMap,
-      zHold, vHold, manList,
+      zHold, vHold, manList, vestList,
       zEquityStocks, zReits, zEtfs, mfRows,
       zTotal, vTotal, mfTotal, zEquityTotal,
       commodityVal, fiVal, retirementVal, manMFCurrent,

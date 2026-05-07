@@ -69,6 +69,7 @@ var App = (function() {
         case 'retirement': Render.renderRetirement(_data); break;
         case 'history':    Render.renderHistory(_data);    break;
         case 'alerts':     Render.renderAlerts(_data);     break;
+        case 'vests':      Render.renderVests(_data);      break;
         case 'watchlist':  Render.renderWatchlist(_data);  break;
         case 'oppcost':    Render.renderOppCost(_data);    break;
       }

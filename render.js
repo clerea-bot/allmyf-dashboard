@@ -942,6 +942,100 @@ const Render = (() => {
     }
   }
 
+  // ── VESTS TAB ─────────────────────────────────────────────────
+  function renderVests(d) {
+    const vests = d.vestList || [];
+
+    const emptyState = `
+      <div class="empty-state" style="padding:60px 0;text-align:center">
+        <div style="font-size:2.5rem;margin-bottom:14px">🧺</div>
+        <div style="font-weight:500;margin-bottom:8px">No Vest data yet</div>
+        <div class="muted" style="font-size:0.85rem">
+          Fill in the <code>vests</code> array in <code>updateManualAssets()</code> with your Vest names
+          and current values, then run the monthly import.
+        </div>
+      </div>`;
+
+    if (vests.length === 0) {
+      document.getElementById('vests-content').innerHTML =
+        sectionHeader('Vests — Vested Investment Plans', 0) + emptyState;
+      return;
+    }
+
+    const totalInvUsd  = vests.reduce(function(s, v) { return s + v._investedUsd; }, 0);
+    const totalCurrUsd = vests.reduce(function(s, v) { return s + v._currentUsd;  }, 0);
+    const totalCurrInr = vests.reduce(function(s, v) { return s + v._currentInr;  }, 0);
+    const totalPnlUsd  = totalCurrUsd - totalInvUsd;
+    const totalPnlPct  = totalInvUsd > 0 ? totalPnlUsd / totalInvUsd * 100 : 0;
+
+    const summaryBar = `
+      <div class="oppcost-summary" style="margin-bottom:20px">
+        <div class="oppcost-stat">
+          <div class="label">Vests tracked</div>
+          <div class="value">${vests.length}</div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">Total invested</div>
+          <div class="value">$${fmt(totalInvUsd, 0)}</div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">Total current value</div>
+          <div class="value">$${fmt(totalCurrUsd, 0)} <span class="muted" style="font-size:0.78rem">≈ ${fmtInr(totalCurrInr)}</span></div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">Overall P&amp;L</div>
+          <div class="value ${pnlClass(totalPnlUsd)}">$${fmt(totalPnlUsd, 0)} <span style="font-size:0.82rem">(${pctStr(totalPnlPct)})</span></div>
+        </div>
+      </div>`;
+
+    const rows = vests.map(function(v) {
+      const pnlStr = v._pnlUsd !== null
+        ? `<span class="${pnlClass(v._pnlUsd)}">$${fmt(v._pnlUsd, 0)} (${pctStr(v._pnlPct)})</span>`
+        : '<span class="muted">—</span>';
+      return `
+        <tr>
+          <td class="symbol">${v.asset_name || v.asset_id}</td>
+          <td class="right">$${fmt(v._investedUsd, 0)}</td>
+          <td class="right">$${fmt(v._currentUsd, 0)}</td>
+          <td class="right ${pnlClass(v._pnlUsd)}">${pnlStr}</td>
+          <td class="right muted">${v._currentInr > 0 ? fmtInr(v._currentInr) : '—'}</td>
+          <td class="muted" style="font-size:0.78rem">${v.snapshot_month || '—'}</td>
+          <td class="muted" style="font-size:0.78rem">${v.notes || ''}</td>
+        </tr>`;
+    }).join('');
+
+    const disclaimer = `
+      <div class="muted" style="font-size:0.80rem;margin:-4px 0 18px;padding:8px 12px;
+           border-left:3px solid var(--bg3);background:var(--bg2);border-radius:4px">
+        ⚠️ Vest values are <strong>display-only</strong> and not included in net worth.
+        Individual stocks within each Vest are already counted via the Vested Holdings import.
+      </div>`;
+
+    const html = `
+      ${sectionHeader('Vests — Vested Investment Plans', vests.length)}
+      ${disclaimer}
+      ${summaryBar}
+      <div class="table-wrap">
+        ${tableControls('vests-tbl')}
+        <div class="table-inner">
+          <table id="vests-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('vests-tbl',0)">Vest Name<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('vests-tbl',1)">Invested (USD)<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('vests-tbl',2)">Current (USD)<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('vests-tbl',3)">P&amp;L<span class="sort-icon">⇅</span></th>
+              <th class="right">Current (INR)</th>
+              <th>Month</th>
+              <th>Notes</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    document.getElementById('vests-content').innerHTML = html;
+  }
+
   // ── WATCHLIST TAB ────────────────────────────────────────────
   function renderWatchlist(d) {
     const active  = d.watchlistActive || [];
@@ -1217,6 +1311,7 @@ const Render = (() => {
     renderRetirement,
     renderHistory,
     renderAlerts,
+    renderVests,
     renderWatchlist,
     renderOppCost,
     filterTable,
