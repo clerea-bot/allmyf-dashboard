@@ -69,6 +69,7 @@ var App = (function() {
         case 'retirement': Render.renderRetirement(_data); break;
         case 'history':    Render.renderHistory(_data);    break;
         case 'alerts':    Render.renderAlerts(_data);    break;
+        case 'oppcost':   Render.renderOppCost(_data);   break;
       }
       _rendered[tab] = true;
       console.log('[App] renderTab', tab, 'complete');

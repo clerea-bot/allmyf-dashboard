@@ -256,6 +256,41 @@ var Data = (function() {
     var manAssets  = d.manual_assets     || [];
     var soldStocks = d.sold_stocks       || [];
     var monthlyPnl = d.monthly_pnl       || [];
+
+    // ── ANNOTATE SOLD STOCKS — opportunity cost + tax fields ──────
+    soldStocks.forEach(function(s) {
+      var sellPx   = parseFloat(s.avg_sell_price_inr) || 0;
+      var qty      = parseFloat(s.total_sell_qty)     || 0;
+      var pnl      = parseFloat(s.realized_pnl_inr)   || 0;
+      var holdDays = parseInt(s.holding_period_days, 10);
+      if (isNaN(holdDays)) holdDays = 0;
+
+      // Tax category — use stored value if present, otherwise derive
+      s._taxCategory  = s.tax_category || (holdDays > 365 ? 'LTCG' : 'STCG');
+      // After-tax delta — use stored value if present, otherwise estimate
+      var storedDelta = parseFloat(s.after_tax_delta);
+      s._afterTaxDelta = isNaN(storedDelta)
+        ? Math.round(pnl * (s._taxCategory === 'LTCG' ? 0.875 : 0.80))
+        : storedDelta;
+
+      // Opportunity cost — requires live price
+      var currPx = livePrices[s.symbol] || 0;
+      if (currPx > 0 && sellPx > 0) {
+        var pct = (currPx - sellPx) / sellPx * 100;
+        s._currentPrice    = currPx;
+        s._opportunityCost = (currPx - sellPx) * qty;   // +ve = could have had more
+        s._opportunityPct  = pct;
+        s._verdict = pct > 10  ? 'REGRET'
+                   : pct > 0   ? 'MILD_REGRET'
+                   : pct > -10 ? 'GOOD_CALL'
+                   :              'GREAT_CALL';
+      } else {
+        s._currentPrice    = null;
+        s._opportunityCost = null;
+        s._opportunityPct  = null;
+        s._verdict         = 'NO_DATA';
+      }
+    });
     var snap       = d.latest_snapshot   || {};
 
     var usdinr = (lp['FX_USDINR'] && lp['FX_USDINR'].price > 0)

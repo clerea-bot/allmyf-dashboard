@@ -942,6 +942,145 @@ const Render = (() => {
     }
   }
 
+  // ── OPPORTUNITY COST TRACKER TAB ─────────────────────────────
+  function renderOppCost(d) {
+    const sold = d.soldStocks || [];
+
+    // Inject verdict badge styles once
+    if (!document.getElementById('oppcost-styles')) {
+      const style = document.createElement('style');
+      style.id = 'oppcost-styles';
+      style.textContent = `
+        .verdict-badge {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 0.78rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        .verdict-REGRET      { background: rgba(192,57,43,0.12);  color: #c0392b; }
+        .verdict-MILD_REGRET { background: rgba(211,84,0,0.12);   color: #d35400; }
+        .verdict-GOOD_CALL   { background: rgba(26,122,60,0.10);  color: #1a7a3c; }
+        .verdict-GREAT_CALL  { background: rgba(45,95,168,0.10);  color: #2d5fa8; }
+        .verdict-NO_DATA     { background: rgba(160,150,140,0.10);color: #7a7065; }
+        .oppcost-summary {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin: 0 0 20px;
+        }
+        .oppcost-stat {
+          padding: 8px 16px;
+          border-radius: 8px;
+          background: var(--bg2);
+          font-size: 0.85rem;
+        }
+        .oppcost-stat .label { color: var(--muted); font-size: 0.78rem; margin-bottom: 2px; }
+        .oppcost-stat .value { font-weight: 600; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    // Summary counts by verdict
+    const counts = { REGRET: 0, MILD_REGRET: 0, GOOD_CALL: 0, GREAT_CALL: 0, NO_DATA: 0 };
+    sold.forEach(function(s) { counts[s._verdict] = (counts[s._verdict] || 0) + 1; });
+
+    const verdictLabel = { REGRET: 'Regret', MILD_REGRET: 'Mild Regret', GOOD_CALL: 'Good Call', GREAT_CALL: 'Great Call', NO_DATA: 'No Data' };
+    const verdictCls   = { REGRET: 'verdict-REGRET', MILD_REGRET: 'verdict-MILD_REGRET', GOOD_CALL: 'verdict-GOOD_CALL', GREAT_CALL: 'verdict-GREAT_CALL', NO_DATA: 'verdict-NO_DATA' };
+
+    // Total opportunity cost (only rows with live price)
+    const priced = sold.filter(function(s) { return s._opportunityCost !== null; });
+    const totalOppCost = priced.reduce(function(acc, s) { return acc + s._opportunityCost; }, 0);
+    const totalAfterTax = sold.reduce(function(acc, s) { return acc + (s._afterTaxDelta || 0); }, 0);
+
+    const summaryStats = `
+      <div class="oppcost-summary">
+        <div class="oppcost-stat">
+          <div class="label">Positions tracked</div>
+          <div class="value">${sold.length}</div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">With live price</div>
+          <div class="value">${priced.length}</div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">Total opportunity cost</div>
+          <div class="value ${totalOppCost >= 0 ? 'neg' : 'pos'}">${fmtInr(totalOppCost, true)}</div>
+        </div>
+        <div class="oppcost-stat">
+          <div class="label">Total after-tax realized</div>
+          <div class="value ${pnlClass(totalAfterTax)}">${fmtInr(totalAfterTax, true)}</div>
+        </div>
+      </div>`;
+
+    // Table rows
+    const rows = sold.map(function(s) {
+      const pnl        = parseFloat(s.realized_pnl_inr || 0);
+      const verdict    = s._verdict || 'NO_DATA';
+      const oppCostStr = s._opportunityCost !== null
+        ? `<span class="${s._opportunityCost >= 0 ? 'neg' : 'pos'}">${fmtInr(s._opportunityCost, true)}</span>`
+        : '<span class="muted">—</span>';
+      const currPxStr  = s._currentPrice !== null
+        ? `₹${fmt(s._currentPrice, 2)}`
+        : '<span class="muted">—</span>';
+      const oppPctStr  = s._opportunityPct !== null
+        ? `<span class="${s._opportunityPct >= 0 ? 'neg' : 'pos'}">${pctStr(s._opportunityPct)}</span>`
+        : '<span class="muted">—</span>';
+      return `
+        <tr>
+          <td class="symbol">${s.symbol}</td>
+          <td class="right">₹${fmt(parseFloat(s.avg_sell_price_inr || 0), 2)}</td>
+          <td class="right">${currPxStr}</td>
+          <td class="right">${oppPctStr}</td>
+          <td class="right">${oppCostStr}</td>
+          <td class="right ${pnlClass(pnl)}">${fmtInr(pnl, true)}</td>
+          <td class="muted">${s._taxCategory || '—'}</td>
+          <td class="right ${pnlClass(s._afterTaxDelta)}">${fmtInr(s._afterTaxDelta, true)}</td>
+          <td><span class="verdict-badge ${verdictCls[verdict]}">${verdictLabel[verdict]}</span></td>
+        </tr>`;
+    }).join('');
+
+    const emptyState = `
+      <div class="empty-state" style="padding:60px 0;text-align:center">
+        <div style="font-size:2.5rem;margin-bottom:14px">📊</div>
+        <div style="font-weight:500;margin-bottom:8px">No sold positions yet</div>
+        <div class="muted" style="font-size:0.85rem">
+          Exited positions will appear here once added to sold_stocks_log.
+        </div>
+      </div>`;
+
+    const html = `
+      ${sectionHeader('Opportunity Cost Tracker', sold.length, `${priced.length} positions with live price`)}
+      <div class="muted" style="font-size:0.82rem;margin:-8px 0 16px">
+        Compares your exit price to today's live price. Opportunity cost = what you left on the table (or saved).
+        <br>LTCG tax (>365 days): 12.5% &nbsp;·&nbsp; STCG tax (≤365 days): 20%
+      </div>
+      ${sold.length > 0 ? summaryStats : ''}
+      <div class="table-wrap">
+        ${sold.length > 0 ? tableControls('oppcost-tbl') : ''}
+        <div class="table-inner">
+          ${sold.length > 0 ? `
+          <table id="oppcost-tbl">
+            <thead><tr>
+              <th onclick="Render.sortTable('oppcost-tbl',0)">Symbol<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('oppcost-tbl',1)">Avg Sell<span class="sort-icon">⇅</span></th>
+              <th class="right">Curr Price</th>
+              <th class="right" onclick="Render.sortTable('oppcost-tbl',3)">Move %<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('oppcost-tbl',4)">Opp. Cost<span class="sort-icon">⇅</span></th>
+              <th class="right" onclick="Render.sortTable('oppcost-tbl',5)">Realized P&amp;L<span class="sort-icon">⇅</span></th>
+              <th>Tax</th>
+              <th class="right" onclick="Render.sortTable('oppcost-tbl',7)">After-Tax<span class="sort-icon">⇅</span></th>
+              <th onclick="Render.sortTable('oppcost-tbl',8)">Verdict<span class="sort-icon">⇅</span></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : emptyState}
+        </div>
+      </div>`;
+
+    document.getElementById('oppcost-content').innerHTML = html;
+  }
+
   return {
     renderSummary,
     renderIndia,
@@ -950,6 +1089,7 @@ const Render = (() => {
     renderRetirement,
     renderHistory,
     renderAlerts,
+    renderOppCost,
     filterTable,
     sortTable,
     sortTableGrouped,
