@@ -549,6 +549,7 @@ var Data = (function() {
       stockAlerts: d.stock_alerts || [],
       nLivePrices, nLiveMFNavs,
       goldPerGram, silverPerGram,
+      rowCounts: (d._meta && d._meta.row_counts) || {},
       generatedAt: d._meta && d._meta.generated_at,
     };
   }

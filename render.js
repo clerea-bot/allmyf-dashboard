@@ -1303,6 +1303,116 @@ const Render = (() => {
     document.getElementById('oppcost-content').innerHTML = html;
   }
 
+  // ── SYSTEM HEALTH ─────────────────────────────────────────
+  function renderHealth(d) {
+    var meta      = (d.raw && d.raw._meta) ? d.raw._meta : {};
+    var rowCounts = d.rowCounts || {};
+    var genAt     = meta.generated_at ? new Date(meta.generated_at) : null;
+
+    // Cache age
+    var ageStr = '—';
+    if (genAt) {
+      var mins = Math.round((Date.now() - genAt.getTime()) / 60000);
+      ageStr = mins < 1 ? 'Just now' : mins + ' min ago';
+    }
+    var genAtStr = genAt ? genAt.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit',
+      day: '2-digit', month: 'short', year: 'numeric',
+    }) + ' IST' : '—';
+
+    // Row count table definition
+    var tabMeta = [
+      { name: 'assets_master',              label: 'assets_master',              note: 'Registry of all assets' },
+      { name: 'zerodha_holdings_import',    label: 'zerodha_holdings_import',    note: 'Monthly snapshots (all months)' },
+      { name: 'trades_log',                 label: 'trades_log',                 note: 'All historical trades' },
+      { name: 'vested_holdings_import',     label: 'vested_holdings_import',     note: 'Monthly snapshots (all months)' },
+      { name: 'monthly_pnl_log',            label: 'monthly_pnl_log',            note: 'One row per month' },
+      { name: 'manual_assets',              label: 'manual_assets',              note: 'Commodities, FDs, bonds, Vests' },
+      { name: 'sold_stocks_log',            label: 'sold_stocks_log',            note: 'Opportunity cost tracker' },
+      { name: 'watchlist',                  label: 'watchlist',                  note: 'Watch items' },
+      { name: 'monthly_portfolio_snapshot', label: 'monthly_portfolio_snapshot', note: 'Historical snapshots' },
+      { name: 'workflow_log',               label: 'workflow_log',               note: 'Import run history' },
+      { name: 'live_prices',                label: 'live_prices',                note: 'GOOGLEFINANCE formula rows' },
+    ];
+
+    var rowCountRows = tabMeta.map(function(t) {
+      var count    = rowCounts[t.name];
+      var countStr = count === undefined ? '—'
+                   : count === -1        ? '⚠ not found'
+                   : count.toLocaleString('en-IN');
+      var cls = count === -1 ? ' class="neg"' : '';
+      return '<tr>' +
+        '<td style="font-family:var(--mono);font-size:0.85rem">' + t.label + '</td>' +
+        '<td style="font-family:var(--mono);text-align:right"' + cls + '>' + countStr + '</td>' +
+        '<td style="color:var(--text3);font-size:0.85em">' + t.note + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var html =
+      '<div class="section-header">' +
+        '<div><h2>System Health</h2>' +
+        '<p class="section-sub">Data pipeline status and sheet row counts</p></div>' +
+      '</div>' +
+
+      '<div class="stat-bar">' +
+        '<div class="stat-item">' +
+          '<div class="stat-label">Data Generated</div>' +
+          '<div class="stat-value" style="font-size:0.85rem">' + genAtStr + '</div>' +
+        '</div>' +
+        '<div class="stat-item">' +
+          '<div class="stat-label">Cache Age</div>' +
+          '<div class="stat-value">' + ageStr + '</div>' +
+        '</div>' +
+        '<div class="stat-item">' +
+          '<div class="stat-label">Live Stock Prices</div>' +
+          '<div class="stat-value">' + (d.nLivePrices || 0) + ' symbols</div>' +
+        '</div>' +
+        '<div class="stat-item">' +
+          '<div class="stat-label">Live MF NAVs</div>' +
+          '<div class="stat-value">' + (d.nLiveMFNavs || 0) + ' funds</div>' +
+        '</div>' +
+        '<div class="stat-item">' +
+          '<div class="stat-label">USD / INR</div>' +
+          '<div class="stat-value">' + Data.fmt(d.usdinr, 2) + '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card" style="margin-top:20px">' +
+        '<div class="card-title">Sheet Row Counts</div>' +
+        '<table class="data-table sortable" style="margin-top:12px">' +
+          '<thead><tr>' +
+            '<th>Tab</th>' +
+            '<th style="text-align:right">Rows</th>' +
+            '<th>Notes</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rowCountRows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+
+      '<div class="card" style="margin-top:16px">' +
+        '<div class="card-title">Backup Status</div>' +
+        '<div style="margin-top:12px;padding:14px;background:var(--bg1);border-radius:var(--r2);color:var(--text2)">' +
+          '<span style="margin-right:6px;opacity:0.45">○</span>' +
+          'GitHub CSV backup &mdash; <em>not yet configured</em>' +
+          '<span style="display:block;margin-top:6px;font-size:0.85em;color:var(--text3)">' +
+            'Phase 6 item: export key tabs to CSV and commit via GitHub API' +
+          '</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card" style="margin-top:16px">' +
+        '<div class="card-title">Build Info</div>' +
+        '<div style="margin-top:8px;font-family:var(--mono);font-size:0.85rem;color:var(--text2);line-height:1.8">' +
+          'Schema version: <strong>v' + (meta.schema_version || '—') + '</strong>' +
+          '<br>Sheet ID: <span style="color:var(--text3)">' +
+            (meta.sheet_id ? meta.sheet_id.slice(0, 14) + '…' : '—') +
+          '</span>' +
+        '</div>' +
+      '</div>';
+
+    document.getElementById('health-content').innerHTML = html;
+  }
+
   return {
     renderSummary,
     renderIndia,
@@ -1314,6 +1424,7 @@ const Render = (() => {
     renderVests,
     renderWatchlist,
     renderOppCost,
+    renderHealth,
     filterTable,
     sortTable,
     sortTableGrouped,

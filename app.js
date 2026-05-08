@@ -72,6 +72,7 @@ var App = (function() {
         case 'vests':      Render.renderVests(_data);      break;
         case 'watchlist':  Render.renderWatchlist(_data);  break;
         case 'oppcost':    Render.renderOppCost(_data);    break;
+        case 'health':     Render.renderHealth(_data);     break;
       }
       _rendered[tab] = true;
       console.log('[App] renderTab', tab, 'complete');
