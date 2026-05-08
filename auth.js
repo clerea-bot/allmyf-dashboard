@@ -109,6 +109,13 @@ const Auth = (() => {
       setTimeout(function() { pwdInput.classList.remove('error'); }, 600);
     }
 
+    // Cloudflare Access mode — skip password entirely
+    if (CONFIG.BYPASS_PASSWORD) {
+      console.log('[Auth] BYPASS_PASSWORD=true — skipping lock screen');
+      setTimeout(showApp, 50);
+      return;
+    }
+
     // Valid session — show app directly
     if (checkSession()) {
       console.log('[Auth] valid session found');

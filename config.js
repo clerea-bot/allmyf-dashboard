@@ -15,6 +15,10 @@ const CONFIG = {
   // Default password: allmyf2026
   PASSWORD_HASH: '27d6ac661190a157f60dbcc165b425d47ef08508661fc0e77ff98b80720d6a94',
 
+  // Set to true to skip the password lock screen (use when Cloudflare Access is the gate)
+  // Set to false to re-enable the password prompt
+  BYPASS_PASSWORD: true,
+
   // Cache API response for N seconds (reduces Apps Script quota usage)
   CACHE_SECONDS: 300,
 
