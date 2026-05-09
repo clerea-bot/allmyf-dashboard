@@ -14,6 +14,7 @@ var App = (function() {
     setupNav();
     setupRefresh();
     loadData();
+    fetchTickerExternal();
   }
 
   // ── NAV ──────────────────────────────────────────────────
@@ -48,6 +49,7 @@ var App = (function() {
         renderTab(_activeTab);
         updateLastUpdated(d.generatedAt);
         setStatus(null, false);
+        updateTickerUsdinr(d.usdinr);
       })
       .catch(function(err) {
         console.error('[App] Data.fetch() rejected:', err);
@@ -127,6 +129,70 @@ var App = (function() {
       var fb = document.getElementById('summary-content');
       if (fb) fb.innerHTML = errorBox(msg);
     }
+  }
+
+  // ── TICKER — USD/INR (from backend data) ─────────────────
+  function updateTickerUsdinr(rate) {
+    var el = document.getElementById('tk-usdinr');
+    if (el && rate > 0) el.textContent = '₹' + Number(rate).toFixed(2);
+  }
+
+  // ── TICKER — S&P 500 (Yahoo Finance) + BTC (CoinGecko) ──
+  function fetchTickerExternal() {
+    // S&P 500 — Yahoo Finance v8 chart API (no key required)
+    window.fetch(
+      'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=2d&includePrePost=false',
+      { cache: 'no-store' }
+    ).then(function(r) {
+      return r.ok ? r.json() : null;
+    }).then(function(j) {
+      if (!j) return;
+      var meta = j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
+      if (!meta) return;
+      var price = meta.regularMarketPrice;
+      var prev  = meta.chartPreviousClose || meta.previousClose;
+      var chg   = (prev > 0 && price > 0) ? (price - prev) / prev * 100 : null;
+      var elPx  = document.getElementById('tk-sp500');
+      var elD   = document.getElementById('tk-sp500-d');
+      if (elPx && price > 0) {
+        elPx.textContent = new Intl.NumberFormat('en-US', {
+          minimumFractionDigits: 2, maximumFractionDigits: 2
+        }).format(price);
+      }
+      if (elD && chg !== null) {
+        elD.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        elD.className   = chg >= 0 ? 'up' : 'dn';
+      }
+      console.log('[App] S&P 500 ticker:', price, chg && chg.toFixed(2) + '%');
+    }).catch(function(err) {
+      console.warn('[App] S&P 500 ticker fetch failed:', err && err.message);
+    });
+
+    // BTC — CoinGecko free API (CORS-enabled, no key required)
+    window.fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
+      { cache: 'no-store' }
+    ).then(function(r) {
+      return r.ok ? r.json() : null;
+    }).then(function(j) {
+      if (!j || !j.bitcoin) return;
+      var price = j.bitcoin.usd;
+      var chg   = j.bitcoin.usd_24h_change;
+      var elPx  = document.getElementById('tk-btc');
+      var elD   = document.getElementById('tk-btc-d');
+      if (elPx && price > 0) {
+        elPx.textContent = '$' + new Intl.NumberFormat('en-US', {
+          maximumFractionDigits: 0
+        }).format(price);
+      }
+      if (elD && chg !== null && chg !== undefined) {
+        elD.textContent = (chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%';
+        elD.className   = chg >= 0 ? 'up' : 'dn';
+      }
+      console.log('[App] BTC ticker:', price, chg && Number(chg).toFixed(2) + '%');
+    }).catch(function(err) {
+      console.warn('[App] BTC ticker fetch failed:', err && err.message);
+    });
   }
 
   return { init: init };
