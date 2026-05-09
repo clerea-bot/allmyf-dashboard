@@ -79,105 +79,9 @@
     }
 
     /* ═══════════════════════════════════════════
-       PASSWORD SCREEN
-    ═══════════════════════════════════════════ */
-    #lock-screen {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--bg);
-      z-index: 1000;
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
-    #lock-screen.fade-out {
-      opacity: 0;
-      transform: scale(0.97);
-      pointer-events: none;
-    }
-    .lock-card {
-      width: 360px;
-      padding: 48px 40px;
-      background: var(--bg2);
-      border: 1px solid var(--border2);
-      border-radius: 20px;
-      box-shadow: 0 4px 32px rgba(42,33,24,0.10);
-    }
-    .lock-logo {
-      font-family: var(--sans);
-      font-size: 1.7rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
-    .lock-logo span { color: var(--gold); }
-    .lock-sub {
-      font-size: 0.78rem;
-      color: var(--text3);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      margin-bottom: 36px;
-    }
-    .lock-label {
-      font-size: 0.72rem;
-      color: var(--text3);
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      margin-bottom: 10px;
-      font-weight: 500;
-    }
-    .lock-input-wrap { position: relative; margin-bottom: 20px; }
-    .lock-input {
-      width: 100%;
-      padding: 13px 16px;
-      background: var(--bg);
-      border: 1px solid var(--border2);
-      border-radius: var(--r);
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 0.95rem;
-      letter-spacing: 0.1em;
-      outline: none;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .lock-input:focus {
-      border-color: var(--gold);
-      box-shadow: 0 0 0 3px var(--gold-dim);
-    }
-    .lock-input.error { border-color: var(--red); animation: shake 0.3s ease; }
-    @keyframes shake {
-      0%,100% { transform: translateX(0); }
-      25%      { transform: translateX(-6px); }
-      75%      { transform: translateX(6px); }
-    }
-    .lock-btn {
-      width: 100%;
-      padding: 13px;
-      background: var(--gold);
-      color: #fff;
-      border: none;
-      border-radius: var(--r);
-      font-family: var(--sans);
-      font-weight: 600;
-      font-size: 0.82rem;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: opacity 0.2s, transform 0.15s;
-    }
-    .lock-btn:hover  { opacity: 0.88; transform: translateY(-1px); }
-    .lock-btn:active { transform: translateY(0); }
-    .lock-error {
-      font-size: 0.78rem;
-      color: var(--red);
-      margin-top: 10px;
-      min-height: 18px;
-    }
-
-    /* ═══════════════════════════════════════════
        MAIN LAYOUT
     ═══════════════════════════════════════════ */
-    #app { display: none; opacity: 0; transition: opacity 0.5s ease; }
-    #app.visible { display: block; opacity: 1; }
+    #app { display: block; }
 
     /* ── TOPBAR ── */
     .topbar {
@@ -248,17 +152,6 @@
       color: var(--text3);
       font-family: var(--mono);
     }
-    .lock-out-btn {
-      width: 28px; height: 28px;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: var(--r);
-      border: 1px solid var(--border);
-      background: none;
-      color: var(--text3);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .lock-out-btn:hover { border-color: var(--red); color: var(--red); }
 
     /* ── CONTENT AREA ── */
     .content { padding: 24px 28px 56px; max-width: 1600px; margin: 0 auto; }
@@ -644,21 +537,6 @@
         stroke="rgba(130,100,42,0.038)" stroke-width="150" fill="none" stroke-linecap="round"/>
 </svg>
 
-<!-- ═══════════════ LOCK SCREEN ═══════════════ -->
-<div id="lock-screen">
-  <div class="lock-card">
-    <div class="lock-logo">All<span>My</span>F</div>
-    <div class="lock-sub">Personal Finance Dashboard</div>
-    <div class="lock-label">Password</div>
-    <div class="lock-input-wrap">
-      <input type="password" class="lock-input" id="pwd-input"
-             placeholder="Enter password" autocomplete="current-password">
-    </div>
-    <button class="lock-btn" id="unlock-btn">Unlock Dashboard</button>
-    <div class="lock-error" id="lock-error"></div>
-  </div>
-</div>
-
 <!-- ═══════════════ APP ═══════════════ -->
 <div id="app">
 
@@ -673,10 +551,6 @@
       <button class="nav-btn" data-tab="retirement">Retirement</button>
       <button class="nav-btn" data-tab="history">History</button>
       <button class="nav-btn" data-tab="alerts">Alerts</button>
-      <button class="nav-btn" data-tab="vests">Vests</button>
-      <button class="nav-btn" data-tab="watchlist">Watchlist</button>
-      <button class="nav-btn" data-tab="oppcost">Opp. Cost</button>
-      <button class="nav-btn" data-tab="health">Health</button>
     </nav>
     <div class="topbar-right">
       <div class="last-updated" id="last-updated">Loading…</div>
@@ -686,11 +560,6 @@
           <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
         </svg>
         Refresh
-      </button>
-      <button class="lock-out-btn" id="lockout-btn" title="Lock">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
-        </svg>
       </button>
     </div>
   </header>
@@ -750,34 +619,6 @@
       </div>
     </div>
 
-    <!-- ── VESTS TAB ── -->
-    <div class="tab-panel" id="tab-vests">
-      <div id="vests-content">
-        <div class="loading-overlay"><div class="spinner"></div></div>
-      </div>
-    </div>
-
-    <!-- ── WATCHLIST TAB ── -->
-    <div class="tab-panel" id="tab-watchlist">
-      <div id="watchlist-content">
-        <div class="loading-overlay"><div class="spinner"></div></div>
-      </div>
-    </div>
-
-    <!-- ── OPPORTUNITY COST TRACKER TAB ── -->
-    <div class="tab-panel" id="tab-oppcost">
-      <div id="oppcost-content">
-        <div class="loading-overlay"><div class="spinner"></div></div>
-      </div>
-    </div>
-
-    <!-- ── SYSTEM HEALTH TAB ── -->
-    <div class="tab-panel" id="tab-health">
-      <div id="health-content">
-        <div class="loading-overlay"><div class="spinner"></div></div>
-      </div>
-    </div>
-
   </main>
 </div>
 
@@ -805,7 +646,6 @@
   }
 </script>
 
-<script src="auth.js"></script>
 <script src="data.js"></script>
 <script src="render.js"></script>
 <script src="app.js"></script>

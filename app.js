@@ -38,7 +38,7 @@ var App = (function() {
   // ── DATA LOAD ────────────────────────────────────────────
   function loadData() {
     console.log('[App] loadData() — calling Data.fetch()');
-    setStatus('Loading\u2026', false);
+    setStatus('Loading…', false);
 
     Data.fetch()
       .then(function(d) {
@@ -69,10 +69,6 @@ var App = (function() {
         case 'retirement': Render.renderRetirement(_data); break;
         case 'history':    Render.renderHistory(_data);    break;
         case 'alerts':     Render.renderAlerts(_data);     break;
-        case 'vests':      Render.renderVests(_data);      break;
-        case 'watchlist':  Render.renderWatchlist(_data);  break;
-        case 'oppcost':    Render.renderOppCost(_data);    break;
-        case 'health':     Render.renderHealth(_data);     break;
       }
       _rendered[tab] = true;
       console.log('[App] renderTab', tab, 'complete');
@@ -117,7 +113,7 @@ var App = (function() {
 
   function errorBox(msg) {
     return '<div class="error-box" style="margin:24px 0">' +
-      '<strong>\u26a0 Error</strong><br><br>' + msg + '<br><br>' +
+      '<strong>⚠ Error</strong><br><br>' + msg + '<br><br>' +
       'Open browser console (F12) for full details. ' +
       'Click <strong>Refresh</strong> to retry.</div>';
   }
@@ -128,7 +124,6 @@ var App = (function() {
     if (el) {
       el.innerHTML = errorBox(msg);
     } else {
-      // Fallback — summary-content always exists
       var fb = document.getElementById('summary-content');
       if (fb) fb.innerHTML = errorBox(msg);
     }
@@ -136,3 +131,6 @@ var App = (function() {
 
   return { init: init };
 }());
+
+// Cloudflare Access is the auth layer — start the app directly.
+App.init();
