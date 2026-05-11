@@ -50,6 +50,7 @@ var App = (function() {
         updateLastUpdated(d.generatedAt);
         setStatus(null, false);
         updateTickerUsdinr(d.usdinr);
+        updateTickerFromData(d);
       })
       .catch(function(err) {
         console.error('[App] Data.fetch() rejected:', err);
@@ -137,38 +138,52 @@ var App = (function() {
     if (el && rate > 0) el.textContent = '₹' + Number(rate).toFixed(2);
   }
 
-  // ── TICKER — S&P 500 (Yahoo Finance) + BTC (CoinGecko) ──
-  function fetchTickerExternal() {
-    // S&P 500 — Yahoo Finance v8 chart API (no key required)
-    window.fetch(
-      'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=2d&includePrePost=false',
-      { cache: 'no-store' }
-    ).then(function(r) {
-      return r.ok ? r.json() : null;
-    }).then(function(j) {
-      if (!j) return;
-      var meta = j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
-      if (!meta) return;
-      var price = meta.regularMarketPrice;
-      var prev  = meta.chartPreviousClose || meta.previousClose;
-      var chg   = (prev > 0 && price > 0) ? (price - prev) / prev * 100 : null;
-      var elPx  = document.getElementById('tk-sp500');
-      var elD   = document.getElementById('tk-sp500-d');
-      if (elPx && price > 0) {
-        elPx.textContent = new Intl.NumberFormat('en-US', {
-          minimumFractionDigits: 2, maximumFractionDigits: 2
-        }).format(price);
-      }
-      if (elD && chg !== null) {
-        elD.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-        elD.className   = chg >= 0 ? 'up' : 'dn';
-      }
-      console.log('[App] S&P 500 ticker:', price, chg && chg.toFixed(2) + '%');
-    }).catch(function(err) {
-      console.warn('[App] S&P 500 ticker fetch failed:', err && err.message);
-    });
+  // ── TICKER — S&P 500 + Sensex (from GOOGLEFINANCE via payload) ──
+  // IDX_SP500 / IDX_SP500_CHG and IDX_SENSEX / IDX_SENSEX_CHG are
+  // rows in live_prices sheet → served in d.lp. No browser fetch needed.
+  function updateTickerFromData(d) {
+    var lp = d.lp || {};
 
-    // BTC — CoinGecko free API (CORS-enabled, no key required)
+    // S&P 500
+    var spPx  = lp['IDX_SP500']     ? lp['IDX_SP500'].price     : null;
+    var spChg = lp['IDX_SP500_CHG'] ? lp['IDX_SP500_CHG'].price : null;
+    if (spPx > 0) {
+      var el = document.getElementById('tk-sp500');
+      if (el) el.textContent = new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      }).format(spPx);
+    }
+    if (spChg !== null) {
+      var eld = document.getElementById('tk-sp500-d');
+      if (eld) {
+        eld.textContent = (spChg >= 0 ? '+' : '') + Number(spChg).toFixed(2) + '%';
+        eld.className   = spChg >= 0 ? 'up' : 'dn';
+      }
+    }
+    console.log('[App] S&P 500 (GOOGLEFINANCE):', spPx, spChg !== null ? spChg.toFixed(2) + '%' : 'no chg');
+
+    // Sensex
+    var sxPx  = lp['IDX_SENSEX']     ? lp['IDX_SENSEX'].price     : null;
+    var sxChg = lp['IDX_SENSEX_CHG'] ? lp['IDX_SENSEX_CHG'].price : null;
+    if (sxPx > 0) {
+      var elS = document.getElementById('tk-sensex');
+      if (elS) elS.textContent = new Intl.NumberFormat('en-IN', {
+        maximumFractionDigits: 0
+      }).format(sxPx);
+    }
+    if (sxChg !== null) {
+      var eldS = document.getElementById('tk-sensex-d');
+      if (eldS) {
+        eldS.textContent = (sxChg >= 0 ? '+' : '') + Number(sxChg).toFixed(2) + '%';
+        eldS.className   = sxChg >= 0 ? 'up' : 'dn';
+      }
+    }
+    console.log('[App] Sensex (GOOGLEFINANCE):', sxPx, sxChg !== null ? sxChg.toFixed(2) + '%' : 'no chg');
+  }
+
+  // ── TICKER — BTC (CoinGecko, browser-side, CORS-enabled) ─
+  // S&P 500 and Sensex moved to updateTickerFromData() above.
+  function fetchTickerExternal() {
     window.fetch(
       'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
       { cache: 'no-store' }
@@ -189,7 +204,7 @@ var App = (function() {
         elD.textContent = (chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%';
         elD.className   = chg >= 0 ? 'up' : 'dn';
       }
-      console.log('[App] BTC ticker:', price, chg && Number(chg).toFixed(2) + '%');
+      console.log('[App] BTC (CoinGecko):', price, chg && Number(chg).toFixed(2) + '%');
     }).catch(function(err) {
       console.warn('[App] BTC ticker fetch failed:', err && err.message);
     });
