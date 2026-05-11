@@ -298,7 +298,7 @@ const Render = (() => {
           <td class="company" style="max-width:280px" title="${m.asset_name}">${m.asset_name}</td>
           <td class="right">${fmt(units, 3)}</td>
           <td class="right">₹${fmt(avgNAV, 4)}</td>
-          <td class="right">${hasLive ? '₹' + fmt(liveNAV, 4) : '<span class="muted">—</span>'}</td>
+          <td class="right">${hasLive ? '₹' + fmt(liveNAV, 4) + ' <span class="live-dot" title="Live NAV from mfapi">●</span>' : '<span class="muted">—</span>'}</td>
           <td class="right gold">₹${fmt(invested, 0)}</td>
           <td class="right">${hasLive ? '₹' + fmt(liveCurr, 0) : '<span class="muted">—</span>'}</td>
           <td class="right ${hasLive ? pnlClass(livePnl) : ''}">${hasLive ? '₹' + fmt(livePnl, 0) : '<span class="muted">—</span>'}</td>

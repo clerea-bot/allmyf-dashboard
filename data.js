@@ -54,6 +54,7 @@ var Data = (function() {
     var assets    = rawJson.assets    || [];
     var zHold     = rawJson.zerodha_holdings || [];
     var mfCodeMap = rawJson.mf_codes  || {};
+    var manAssets = rawJson.manual_assets || [];
 
     // Build name → scheme code map from assets_master
     var nameToCode = {};
@@ -65,14 +66,28 @@ var Data = (function() {
     });
 
     var ETF_SYMS = ['OILIETF','METAL','MAHKTECH','CPSEETF','MID150CASE','TOP100CASE'];
-    var zerodhaSymToCode = {};
-    var neededCodes      = {};
-    var searchQueue      = [];   // [{symbol, snapshotNav}] for L3
+    var zerodhaSymToCode   = {};
+    var neededCodes        = {};
+    var searchQueue        = [];   // [{symbol, snapshotNav}] for Zerodha L3
+    var manMFSearchQueue   = [];   // [{assetId, name, avgNav}] for non-Zerodha MF name search
+    var manMFAssetIdToCode = {};   // assetId → scheme code discovered via name search
 
     // Non-Zerodha MF codes (already in assets_master mf_scheme_code)
     Object.keys(mfCodeMap).forEach(function(id) {
       var c = String(mfCodeMap[id] || '').trim();
       if (c && c !== 'LOOKUP_NEEDED') neededCodes[c] = true;
+    });
+
+    // Queue non-Zerodha MFs that are missing a scheme code — for name-based L3 fallback
+    manAssets.forEach(function(m) {
+      if (!m.asset_id || m.asset_id.indexOf('MF_') < 0) return;
+      var code = mfCodeMap[m.asset_id] ? String(mfCodeMap[m.asset_id]).trim() : '';
+      if (!code || code === 'LOOKUP_NEEDED') {
+        var units    = parseFloat(m.quantity       || 0);
+        var invested = parseFloat(m.invested_amount || 0);
+        var avgNav   = (units > 0 && invested > 0) ? invested / units : 0;
+        if (m.asset_name) manMFSearchQueue.push({ assetId: m.asset_id, name: m.asset_name, avgNav: avgNav });
+      }
     });
 
     // Zerodha MF rows — attempt L1 then L2; queue L3 if no match
@@ -146,41 +161,98 @@ var Data = (function() {
         });
     });
 
-    return Promise.all(searchPromises).then(function(searchResults) {
-      searchResults.forEach(function(r) {
-        if (!r) return;
-        console.log('[Data] mfapi L3 match:', r.symbol, '→', r.code, '(NAV', r.nav + ')');
-        zerodhaSymToCode[r.symbol] = r.code;
-        neededCodes[r.code] = true;
-      });
+    // Name-based mfapi search for non-Zerodha MFs that don't have a scheme code
+    var manMFSearchPromises = manMFSearchQueue.map(function(item) {
+      var words = item.name.split(' ').slice(0, 5).join(' ');
+      var url   = 'https://api.mfapi.in/mf/search?q=' + encodeURIComponent(words);
+      var ctrl  = new AbortController();
+      var timer = setTimeout(function() { ctrl.abort(); }, 8000);
 
-      var allCodes = Object.keys(neededCodes).filter(function(c) {
-        return c && c !== 'LOOKUP_NEEDED';
-      });
-      if (allCodes.length === 0) return { navMap: {}, zerodhaSymToCode: zerodhaSymToCode };
-
-      console.log('[Data] mfapi fetching', allCodes.length, 'scheme codes');
-      return Promise.all(allCodes.map(function(code) {
-        var ctrl  = new AbortController();
-        var timer = setTimeout(function() { ctrl.abort(); }, 10000);
-        return window.fetch('https://api.mfapi.in/mf/' + code + '/latest',
-          { cache: 'no-store', signal: ctrl.signal })
-          .then(function(r) { clearTimeout(timer); return r.ok ? r.json() : null; })
-          .then(function(j) {
-            if (j && j.status === 'SUCCESS' && j.data && j.data[0]) {
-              var nav = parseFloat(j.data[0].nav);
-              return nav > 0 ? { code: code, nav: nav, navDate: j.data[0].navDate } : null;
-            }
-            return null;
-          })
-          .catch(function() { return null; });
-      })).then(function(results) {
-        var navMap = {}, ok = 0;
-        results.forEach(function(r) { if (r && r.nav) { navMap[r.code] = r; ok++; } });
-        console.log('[Data] mfapi done:', ok + '/' + allCodes.length, 'NAVs loaded');
-        return { navMap: navMap, zerodhaSymToCode: zerodhaSymToCode };
-      });
+      return window.fetch(url, { signal: ctrl.signal, cache: 'no-store' })
+        .then(function(r) { clearTimeout(timer); return r.ok ? r.json() : []; })
+        .then(function(results) {
+          if (!Array.isArray(results) || results.length === 0) return null;
+          var cands = results.slice(0, 8);
+          return Promise.all(cands.map(function(c) {
+            return window.fetch('https://api.mfapi.in/mf/' + c.schemeCode + '/latest',
+              { cache: 'no-store' })
+              .then(function(r2) { return r2.ok ? r2.json() : null; })
+              .catch(function() { return null; });
+          })).then(function(navResults) {
+            var best = null, bestDiff = Infinity;
+            navResults.forEach(function(nr, i) {
+              if (!nr || nr.status !== 'SUCCESS' || !nr.data || !nr.data[0]) return;
+              var nav = parseFloat(nr.data[0].nav);
+              if (item.avgNav > 0) {
+                // Use avg NAV proximity (30% tolerance — avg drifts from current)
+                var diff = Math.abs(nav - item.avgNav) / item.avgNav;
+                if (diff < 0.30 && diff < bestDiff) {
+                  bestDiff = diff;
+                  best = { assetId: item.assetId, code: String(cands[i].schemeCode), nav: nav, navDate: nr.data[0].navDate };
+                }
+              } else if (!best) {
+                // No avgNav — take first valid result
+                best = { assetId: item.assetId, code: String(cands[i].schemeCode), nav: nav, navDate: nr.data[0].navDate };
+              }
+            });
+            return best;
+          });
+        })
+        .catch(function(err) {
+          clearTimeout(timer);
+          console.warn('[Data] mfapi name-search failed:', item.name, err && err.message);
+          return null;
+        });
     });
+
+    return Promise.all([Promise.all(searchPromises), Promise.all(manMFSearchPromises)])
+      .then(function(allResults) {
+        var searchResults      = allResults[0];
+        var manMFSearchResults = allResults[1];
+
+        // Zerodha L3 matches
+        searchResults.forEach(function(r) {
+          if (!r) return;
+          console.log('[Data] mfapi L3 match:', r.symbol, '→', r.code, '(NAV', r.nav + ')');
+          zerodhaSymToCode[r.symbol] = r.code;
+          neededCodes[r.code] = true;
+        });
+
+        // Non-Zerodha MF name-search matches
+        manMFSearchResults.forEach(function(r) {
+          if (!r) return;
+          console.log('[Data] mfapi name-match:', r.assetId, '→', r.code, '(NAV', r.nav + ')');
+          manMFAssetIdToCode[r.assetId] = r.code;
+          neededCodes[r.code] = true;
+        });
+
+        var allCodes = Object.keys(neededCodes).filter(function(c) {
+          return c && c !== 'LOOKUP_NEEDED';
+        });
+        if (allCodes.length === 0) return { navMap: {}, zerodhaSymToCode: zerodhaSymToCode, manMFAssetIdToCode: manMFAssetIdToCode };
+
+        console.log('[Data] mfapi fetching', allCodes.length, 'scheme codes');
+        return Promise.all(allCodes.map(function(code) {
+          var ctrl  = new AbortController();
+          var timer = setTimeout(function() { ctrl.abort(); }, 10000);
+          return window.fetch('https://api.mfapi.in/mf/' + code + '/latest',
+            { cache: 'no-store', signal: ctrl.signal })
+            .then(function(r) { clearTimeout(timer); return r.ok ? r.json() : null; })
+            .then(function(j) {
+              if (j && j.status === 'SUCCESS' && j.data && j.data[0]) {
+                var nav = parseFloat(j.data[0].nav);
+                return nav > 0 ? { code: code, nav: nav, navDate: j.data[0].navDate } : null;
+              }
+              return null;
+            })
+            .catch(function() { return null; });
+        })).then(function(results) {
+          var navMap = {}, ok = 0;
+          results.forEach(function(r) { if (r && r.nav) { navMap[r.code] = r; ok++; } });
+          console.log('[Data] mfapi done:', ok + '/' + allCodes.length, 'NAVs loaded');
+          return { navMap: navMap, zerodhaSymToCode: zerodhaSymToCode, manMFAssetIdToCode: manMFAssetIdToCode };
+        });
+      });
   }
 
   // ── HTTP GET ─────────────────────────────────────────────
@@ -243,9 +315,10 @@ var Data = (function() {
   // mfResult: { navMap: { schemeCode → {nav,navDate} }, zerodhaSymToCode: {sym→code} }
   // d.live_stock_prices: { symbol → price } — comes from Apps Script TwelveData call
   function compute(d, mfResult) {
-    mfResult = mfResult || { navMap: {}, zerodhaSymToCode: {} };
-    var navMap           = mfResult.navMap          || {};
-    var zerodhaSymToCode = mfResult.zerodhaSymToCode || {};
+    mfResult = mfResult || { navMap: {}, zerodhaSymToCode: {}, manMFAssetIdToCode: {} };
+    var navMap             = mfResult.navMap             || {};
+    var zerodhaSymToCode   = mfResult.zerodhaSymToCode   || {};
+    var manMFAssetIdToCode = mfResult.manMFAssetIdToCode || {};
     var mfCodeMap        = d.mf_codes              || {};
     var livePrices       = d.live_stock_prices      || {};   // ← from Apps Script
 
@@ -394,7 +467,9 @@ var Data = (function() {
     var manMFCurrent = 0, manMFInvested = 0;
     manList.forEach(function(m) {
       if (!m.asset_id || m.asset_id.indexOf('MF_') < 0) return;
-      var code     = mfCodeMap[m.asset_id] ? String(mfCodeMap[m.asset_id]).trim() : '';
+      var code = mfCodeMap[m.asset_id] ? String(mfCodeMap[m.asset_id]).trim() : '';
+      // Fallback: use scheme code discovered via name-based mfapi search
+      if (!code || code === 'LOOKUP_NEEDED') code = manMFAssetIdToCode[m.asset_id] || '';
       var units    = parseFloat(m.quantity      || 0);
       var invested = parseFloat(m.invested_amount || 0);
       manMFInvested += invested;
