@@ -247,25 +247,32 @@ const Render = (() => {
     // h._liveNAV / h._liveCurrent are set by compute() if mfapi matched the fund name.
     // Falls back to ltp_inr / current_value_inr from the monthly snapshot.
     const mfRows = d.mfRows.map(h => {
+      const hasLive   = h._liveNAV !== undefined;
       const avgNAV    = parseFloat(h.avg_cost_inr);
-      const liveNAV   = h._liveNAV !== undefined ? h._liveNAV : parseFloat(h.ltp_inr);
+      const liveNAV   = hasLive ? h._liveNAV : parseFloat(h.ltp_inr);
       const liveCurr  = h._liveCurrent !== undefined ? h._liveCurrent : parseFloat(h.current_value_inr);
       const invested  = parseFloat(h.invested_inr || 0);
       const livePnl   = liveCurr - invested;
       const livePct   = invested > 0 ? (livePnl / invested) * 100 : null;
-      const navSrc    = h._liveNAV !== undefined ? '' : '';  // no badge; data speaks for itself
+      const navCell   = hasLive
+        ? `₹${fmt(liveNAV, 4)} <span class="live-dot" title="Live NAV from mfapi">●</span>`
+        : `₹${fmt(liveNAV, 4)}`;
       return `
         <tr>
           <td class="company" style="max-width:300px" title="${h.symbol}">${h.symbol}</td>
           <td class="right">${fmt(parseFloat(h.quantity), 3)}</td>
           <td class="right">₹${fmt(avgNAV, 4)}</td>
-          <td class="right">₹${fmt(liveNAV, 4)}</td>
+          <td class="right">${navCell}</td>
           <td class="right gold">₹${fmt(invested, 0)}</td>
           <td class="right">₹${fmt(liveCurr, 0)}</td>
           <td class="right ${pnlClass(livePnl)}">₹${fmt(livePnl, 0)}</td>
           <td class="right ${livePct !== null ? pnlClass(livePct) : ''}">${livePct !== null ? pctStr(livePct) : '—'}</td>
         </tr>`;
     }).join('');
+
+    // Badge for Zerodha MF section — live NAV count
+    const liveMFZCount = d.mfRows.filter(h => h._liveNAV !== undefined).length;
+    const mfZBadge     = liveMFZCount > 0 ? `${liveMFZCount}/${d.mfRows.length} live NAVs` : 'mfapi.in';
 
     // India equity headers — use sortTableGrouped to keep Stocks/REITs/ETFs separate
     const thRow = `
@@ -325,7 +332,7 @@ const Render = (() => {
           </table>
         </div>
       </div>
-      ${sectionHeader('Mutual Funds — Zerodha', d.mfRows.length)}
+      ${sectionHeader('Mutual Funds — Zerodha', d.mfRows.length, mfZBadge)}
       <div class="table-wrap">
         <div class="table-inner">
           <table id="mf-tbl">
