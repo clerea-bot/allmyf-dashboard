@@ -15,7 +15,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 var Data = (function() {
-  var CACHE_KEY     = 'allmyf_data_v7';
+  var CACHE_KEY     = 'allmyf_data_v8';
   var FETCH_TIMEOUT = 25000;
   var _raw      = null;
   var _computed = null;
@@ -97,7 +97,7 @@ var Data = (function() {
 
   function clearCache() {
     // Clear both v5 and v6 keys to ensure full reset
-    ['allmyf_data_v5', 'allmyf_data_v6', 'allmyf_lp_v1'].forEach(function(k) {
+    ['allmyf_data_v5', 'allmyf_data_v6', 'allmyf_data_v7', 'allmyf_lp_v1'].forEach(function(k) {
       sessionStorage.removeItem(k);
     });
     console.log('[Data] all caches cleared');
@@ -181,6 +181,22 @@ var Data = (function() {
       w._active = !w.remove_date && w.status !== 'bought' && w.status !== 'dropped';
     });
     var watchlistActive = watchlist.filter(function(w) { return w._active; });
+
+    // ── FILTER HOLDINGS TO LATEST SNAPSHOT MONTH ONLY ────────
+    // Without this, all historical months accumulate and every
+    // holding appears once per month it was ever imported.
+    function latestSnapshotOnly(arr, key) {
+      if (!arr || !arr.length) return arr;
+      var latest = arr.reduce(function(m, r) {
+        var s = String(r[key] || '').trim();
+        return s > m ? s : m;
+      }, '');
+      return latest ? arr.filter(function(r) {
+        return String(r[key] || '').trim() === latest;
+      }) : arr;
+    }
+    zHold = latestSnapshotOnly(zHold, 'snapshot_month');
+    vHold = latestSnapshotOnly(vHold, 'snapshot_month');
 
     var snap       = d.latest_snapshot   || {};
 
